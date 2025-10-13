@@ -1,7 +1,7 @@
 #+TITLE: Extending Containers on LUMI
 #+AUTHOR: Shanshan Wang
-#+OPTIONS: toc:nil
-#+OPTIONS: num:nil
+#+OPTIONS: toc:t
+#+OPTIONS: num:t
 
 * Introduction
 In this documentation, we provide examples of how to extend a prebuilt container and install system packages such as Poppler (a PDF rendering library) and Python packages.
