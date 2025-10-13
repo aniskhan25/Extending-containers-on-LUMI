@@ -156,3 +156,6 @@ export SING_IMAGE='/scratch/project_462000824/shanshan/csc-poppler.sif'
 source h5-env/bin/activate
 python my-script.py
 #+END_SRC
+* References
+- [[https://github.com/Lumi-supercomputer/LUMI-AI-Guide/tree/main/2-setting-up-environment]]
+- [[https://lumi-supercomputer.github.io/LUMI-training-materials/2day-20240502/09_Containers/]]
