@@ -77,8 +77,8 @@ Singularity> pip list
 #+BEGIN_SRC bash
 srun --account=project_462000824 --partition=dev-g --ntasks=1 --cpus-per-task=7 --gpus-per-node=1 --mem=60G --time=02:30:00 --nodes=1 --pty bash
 export SIF=/scratch/project_462000824/shanshan/lumi-poppler.sif # export the path of the newly built container
-module use /appl/local/containers/ai-modules
-module load singularity-AI-bindings
+module use /appl/local/containers/ai-modules # Bind the path with the container
+module load singularity-AI-bindings # Bind the path with the container
 srun singularity exec $SIF bash -c '$WITH_CONDA && source h5-env/bin/activate && python my-script.py'
 #+END_SRC
 
