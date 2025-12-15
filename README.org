@@ -190,8 +190,7 @@ After building, one can go inside the new container by =apptainer shell csc-popp
   pip install pdf2image h5py
 #+END_SRC
 
-Test if the poppler works
-one can create a python virtual environment inside the new container
+Test if the poppler works,
 #+BEGIN_SRC python
   from pdf2image import convert_from_path
   images = convert_from_path('sample.pdf', fmt='png')
