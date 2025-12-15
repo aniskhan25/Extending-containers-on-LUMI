@@ -156,6 +156,47 @@ export SING_IMAGE='/scratch/project_462000824/shanshan/csc-poppler.sif'
 source h5-env/bin/activate
 python my-script.py
 #+END_SRC
+* Extending Pytorch Containers on Mahti
+#+BEGIN_SRC bash
+module use /appl/local/csc/modulefiles/
+module load pytorch/2.7
+module show pytorch   # Lists the location of the container
+#+END_SRC
+
+It shows the path of the pytorch container as ="SING_IMAGE","/appl/soft/ai/wrap/pytorch-2.7/container.sif")=, copy the container to your scratch folder =cp /appl/soft/ai/wrap/pytorch-2.7/container.sif /scratch/project_id/username=. Check which system this container is built upon, =apptainer exec container.sif cat /etc/os-release=. On mahti, the container is built on the Rocky-linux, so in the def file =poppler-csc.def= where we need to install poppler-utils, we define as follows:
+
+#+BEGIN_SRC bash
+Bootstrap: localimage
+From: container.sif
+
+%post
+    dnf -y install poppler-utils && \
+    dnf -y clean all
+#+END_SRC
+
+Next, build the new container which includes poppler-utils,
+
+
+#+BEGIN_SRC bash
+  export APPTAINER_TMPDIR=$TMPDIR
+  export APPTAINER_CACHEDIR=$TMPDIR/apptainer-cache
+  apptainer build --fakeroot csc-poppler.sif poppler-csc.def
+#+END_SRC
+
+After building, one can go inside the new container by =apptainer shell csc-poppler.sif=, and one can create a python virtual environment inside the new container
+#+BEGIN_SRC bash
+  python -m venv h5-env --system-site-packages
+  source h5-env/bin/activate
+  pip install pdf2image h5py
+#+END_SRC
+
+Test if the poppler works
+one can create a python virtual environment inside the new container
+#+BEGIN_SRC python
+  from pdf2image import convert_from_path
+  images = convert_from_path('sample.pdf', fmt='png')
+#+END_SRC
+
 * References
 - [[https://github.com/Lumi-supercomputer/LUMI-AI-Guide/tree/main/2-setting-up-environment]]
 - [[https://lumi-supercomputer.github.io/LUMI-training-materials/2day-20240502/09_Containers/]]
