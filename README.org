@@ -3,7 +3,6 @@
 #+OPTIONS: toc:nil
 #+OPTIONS: num:t
 
-* Guide
 This guide shows how to extend the current LUMI AI Factory container with Poppler.
 The current LUMI AI Factory multi-framework container is available at =/appl/local/laifs/containers/lumi-multitorch-latest.sif=.
 
