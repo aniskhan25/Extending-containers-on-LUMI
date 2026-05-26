@@ -80,7 +80,7 @@ From the allocated shell:
 #+BEGIN_SRC bash
 module use /appl/local/laifs/modules
 module load lumi-aif-singularity-bindings
-singularity exec $SIF bash -c "source $VENV/bin/activate && python -c 'from pdf2image import convert_from_path; convert_from_path(\"sample.pdf\", fmt=\"png\")'"
+singularity exec $SIF $VENV/bin/python -c 'from pdf2image import convert_from_path; convert_from_path("sample.pdf", fmt="png")'
 #+END_SRC
 
 * References
