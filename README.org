@@ -52,8 +52,6 @@ singularity build $SIF poppler-lumi.def
 From the allocated shell:
 
 #+BEGIN_SRC bash
-module use /appl/local/laifs/modules
-module load lumi-aif-singularity-bindings
 singularity exec $SIF pdftoppm -png sample.pdf sample
 #+END_SRC
 
