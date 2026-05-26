@@ -7,25 +7,27 @@
 In this documentation, we provide examples of how to extend a prebuilt container and install system packages such as Poppler (a PDF rendering library) and Python packages.
 
 * Extending Containers Built by LUMI
-The containers maintained by LUMI are located in =/appl/local/containers/sif-images=. In this guide, we use =lumi-pytorch-rocm-6.2.4-python-3.12-pytorch-v2.7.1.sif= as an example.
+The current LUMI AI Factory multi-framework container is available at =/appl/local/laifs/containers/lumi-multitorch-latest.sif=. In this guide, we use it as the base image.
 
 ** Allocate resources
 Building containers requires memory, so it is recommended to allocate resources before extending the container:
 
 #+BEGIN_SRC bash
-srun --account=project_462000824 --partition=dev-g --ntasks=1 --cpus-per-task=7 --gpus-per-node=1 --mem=120G --time=02:30:00 --nodes=1 --pty bash
+srun --account=<project> --partition=dev-g --ntasks=1 --cpus-per-task=7 --gpus-per-node=1 --mem=120G --time=02:30:00 --nodes=1 --pty bash
 #+END_SRC
 
 ** Copy the container to your scratch folder
 It is always recommended to copy the container you plan to extend to your scratch folder, as the original container may be updated or deleted:
 
 #+BEGIN_SRC bash
-cp /appl/local/containers/sif-images/lumi-pytorch-rocm-6.2.4-python-3.12-pytorch-v2.7.1.sif /scratch/project_462000824/shanshan
+cp /appl/local/laifs/containers/lumi-multitorch-latest.sif /scratch/<project>/<user>/lumi-multitorch-base.sif
 #+END_SRC
 
 ** Load necessary modules
 #+BEGIN_SRC bash
-module load LUMI/23.09 systools
+module purge
+module load CrayEnv
+module load PRoot
 #+END_SRC
 
 ** Create a definition file
@@ -33,18 +35,20 @@ Create a definition file (e.g., =poppler-lumi.def=) where you define the package
 
 #+BEGIN_SRC bash
 Bootstrap: localimage
-From: lumi-pytorch-rocm-6.2.4-python-3.12-pytorch-v2.7.1.sif
+From: /scratch/<project>/<user>/lumi-multitorch-base.sif
 
 %post
-    zypper -n install poppler-tools
-    pip install pdf2image
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y poppler-utils
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
 #+END_SRC
 
 ** Build the container
 Use Singularity to build the new container:
 
 #+BEGIN_SRC bash
-singularity build lumi-poppler.sif poppler-lumi.def
+singularity build /scratch/<project>/<user>/lumi-poppler.sif poppler-lumi.def
 #+END_SRC
 
 ** Notes
@@ -54,12 +58,11 @@ Building containers can take time, so you may not want to rebuild each time you 
 For new Python packages, create a virtual environment after loading the container:
 
 #+BEGIN_SRC bash
-export SIF=/scratch/project_462000824/shanshan/lumi-poppler.sif
+export SIF=/scratch/<project>/<user>/lumi-poppler.sif
 singularity shell $SIF
-Singularity> $WITH_CONDA
-(pytorch) Singularity> python -m venv h5-env --system-site-packages
-(pytorch) Singularity> source h5-env/bin/activate
-(h5-env) (pytorch) Singularity> pip install h5py
+Singularity> python -m venv h5-env --system-site-packages
+Singularity> source h5-env/bin/activate
+(h5-env) Singularity> pip install pdf2image h5py
 #+END_SRC
 
 *** System packages
@@ -67,37 +70,39 @@ For new system packages, it is good to rebuild the container.
 *** To check installed system and Python packages in the existing container:
 
 #+BEGIN_SRC bash
-export SIF=/scratch/project_462000824/shanshan/lumi-pytorch-rocm-6.2.4-python-3.12-pytorch-v2.7.1.sif
+export SIF=/scratch/<project>/<user>/lumi-multitorch-base.sif
 singularity shell $SIF
-Singularity> zypper se -i
+Singularity> dpkg -l
 Singularity> pip list
 #+END_SRC
 
 *** Overall workflow
 #+BEGIN_SRC bash
-srun --account=project_462000824 --partition=dev-g --ntasks=1 --cpus-per-task=7 --gpus-per-node=1 --mem=60G --time=02:30:00 --nodes=1 --pty bash
-export SIF=/scratch/project_462000824/shanshan/lumi-poppler.sif # export the path of the newly built container
-module use /appl/local/containers/ai-modules # Bind the path with the container
-module load singularity-AI-bindings # Bind the path with the container
-srun singularity exec $SIF bash -c '$WITH_CONDA && source h5-env/bin/activate && python my-script.py'
+srun --account=<project> --partition=dev-g --ntasks=1 --cpus-per-task=7 --gpus-per-node=1 --mem=60G --time=02:30:00 --nodes=1 --pty bash
+export SIF=/scratch/<project>/<user>/lumi-poppler.sif
+module use /appl/local/laifs/modules
+module load lumi-aif-singularity-bindings
+srun singularity exec $SIF bash -c 'source h5-env/bin/activate && python my-script.py'
 #+END_SRC
 
 * Extending Containers Built by CSC
-Containers maintained by CSC are based on Ubuntu, unlike LUMI containers which use SuSE Linux. CSC prebuilt PyTorch containers are located in =/appl/local/csc/soft/ai/images=. In this guide, we use =pytorch_2.7.1_lumi.sif= as an example.
+Containers maintained by CSC are based on Ubuntu. CSC prebuilt PyTorch containers are located in =/appl/local/csc/soft/ai/images=. In this guide, we use =pytorch_2.7.1_lumi.sif= as an example.
 
 ** Allocate resources
 #+BEGIN_SRC bash
-srun --account=project_462000824 --partition=dev-g --ntasks=1 --cpus-per-task=7 --gpus-per-node=1 --mem=120G --time=02:30:00 --nodes=1 --pty bash
+srun --account=<project> --partition=dev-g --ntasks=1 --cpus-per-task=7 --gpus-per-node=1 --mem=120G --time=02:30:00 --nodes=1 --pty bash
 #+END_SRC
 
 ** Copy the container to your scratch folder
 #+BEGIN_SRC bash
-cp /appl/local/csc/soft/ai/images/pytorch_2.7.1_lumi.sif /scratch/project_462000824/shanshan
+cp /appl/local/csc/soft/ai/images/pytorch_2.7.1_lumi.sif /scratch/<project>/<user>
 #+END_SRC
 
 ** Load necessary modules
 #+BEGIN_SRC bash
-module load LUMI/23.09 systools
+module purge
+module load CrayEnv
+module load PRoot
 #+END_SRC
 
 ** Create a definition file
@@ -116,7 +121,7 @@ From: pytorch_2.7.1_lumi.sif
 
 ** Build the container
 #+BEGIN_SRC bash
-singularity build csc-poppler.sif poppler-csc.def
+singularity build /scratch/<project>/<user>/csc-poppler.sif poppler-csc.def
 #+END_SRC
 
 ** Notes
@@ -128,7 +133,7 @@ For new Python packages, create a virtual environment after loading the containe
 #+BEGIN_SRC bash
 module use /appl/local/csc/modulefiles/
 module load pytorch/2.7
-export SING_IMAGE='/scratch/project_462000824/shanshan/csc-poppler.sif'
+export SING_IMAGE='/scratch/<project>/<user>/csc-poppler.sif'
 python -m venv h5-env --system-site-packages
 source h5-env/bin/activate
 pip install h5py
@@ -149,10 +154,10 @@ pip list
 
 *** Overall workflow
 #+BEGIN_SRC bash
-srun --account=project_462000824 --partition=dev-g --ntasks=1 --cpus-per-task=7 --gpus-per-node=1 --mem=60G --time=02:30:00 --nodes=1 --pty bash
+srun --account=<project> --partition=dev-g --ntasks=1 --cpus-per-task=7 --gpus-per-node=1 --mem=60G --time=02:30:00 --nodes=1 --pty bash
 module use /appl/local/csc/modulefiles/
 module load pytorch/2.7
-export SING_IMAGE='/scratch/project_462000824/shanshan/csc-poppler.sif'
+export SING_IMAGE='/scratch/<project>/<user>/csc-poppler.sif'
 source h5-env/bin/activate
 python my-script.py
 #+END_SRC
