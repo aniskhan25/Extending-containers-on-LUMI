@@ -15,6 +15,9 @@ Building containers requires memory, so it is recommended to allocate resources 
 #+BEGIN_SRC bash
 export PROJECT=<project>
 export SIF=/scratch/$PROJECT/$USER/lumi-poppler.sif
+#+END_SRC
+
+#+BEGIN_SRC bash
 srun --account=$PROJECT --partition=dev-g --ntasks=1 --cpus-per-task=7 --mem=120G --time=02:30:00 --nodes=1 --pty bash
 #+END_SRC
 
