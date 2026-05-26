@@ -14,6 +14,9 @@ Building containers requires memory, so it is recommended to allocate resources 
 
 #+BEGIN_SRC bash
 export PROJECT=<project>
+#+END_SRC
+
+#+BEGIN_SRC bash
 export SIF=/scratch/$PROJECT/$USER/lumi-poppler.sif
 #+END_SRC
 
@@ -60,9 +63,14 @@ Create a virtual environment inside the container for Python packages:
 module use /appl/local/laifs/modules
 module load lumi-aif-singularity-bindings
 singularity shell $SIF
-Singularity> python -m venv h5-env --system-site-packages
-Singularity> source h5-env/bin/activate
-(h5-env) Singularity> pip install pdf2image h5py
+#+END_SRC
+
+Inside the container:
+
+#+BEGIN_SRC bash
+python -m venv h5-env --system-site-packages
+source h5-env/bin/activate
+pip install pdf2image h5py
 #+END_SRC
 
 ** Run a script
