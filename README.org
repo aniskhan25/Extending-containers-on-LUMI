@@ -90,3 +90,6 @@ srun singularity exec $SIF bash -c 'source h5-env/bin/activate && python my-scri
 * References
 - [[https://docs.lumi-supercomputer.eu/software/containers/singularity/]]
 - [[https://docs.lumi-supercomputer.eu/laif/software/ai-environment/]]
+
+* Credits
+Original guide by Shanshan Wang. Updated by Anis Rahman.
