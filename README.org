@@ -1,7 +1,7 @@
 #+TITLE: Extending Containers on LUMI
 #+AUTHOR: Shanshan Wang
 #+OPTIONS: toc:nil
-#+OPTIONS: num:t
+#+OPTIONS: num:nil
 
 This guide shows how to extend the current LUMI AI Factory container with Poppler.
 The current LUMI AI Factory multi-framework container is available at =/appl/local/laifs/containers/lumi-multitorch-latest.sif=.
