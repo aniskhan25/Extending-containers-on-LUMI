@@ -8,13 +8,8 @@ From: {{ LAIF_BASE }}
     Author Anis Rahman
     Description LAIF PyTorch container extended for Matbench Discovery on LUMI
 
-%files
-    scripts/matbench-smoke.py /opt/matbench-smoke.py
-
 %post
     set -eux
-
-    chmod 0755 /opt/matbench-smoke.py
 
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
@@ -80,4 +75,10 @@ PY
 
 %test
     mkdir -p "$MPLCONFIGDIR" "$XDG_CACHE_HOME" "$MBD_CACHE_DIR"
-    python /opt/matbench-smoke.py
+    python - <<'PY'
+import importlib
+
+for module_name in ("matbench_discovery", "ase", "pymatgen", "numpy", "torch"):
+    module = importlib.import_module(module_name)
+    print(f"{module_name}: {getattr(module, '__version__', 'unknown')}")
+PY
