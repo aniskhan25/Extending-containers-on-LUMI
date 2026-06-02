@@ -1,24 +1,56 @@
-#+TITLE: Extending Containers on LUMI
-#+AUTHOR: Shanshan Wang
+#+TITLE: Extending LAIF Containers on LUMI for Matbench Discovery
+#+AUTHOR: Shanshan Wang, Anis Rahman
 #+OPTIONS: toc:nil
 #+OPTIONS: num:nil
 
-This guide shows how to extend the current LUMI AI Factory container with Poppler.
-The current LUMI AI Factory multi-framework container is available at =/appl/local/laifs/containers/lumi-multitorch-latest.sif=.
+This guide shows how to extend the LUMI AI Factory (LAIF) PyTorch container so
+that it can run the Matbench Discovery benchmark framework.
 
-Building containers requires memory, so run these commands on a LUMI login node and allocate resources before extending the container:
+Matbench Discovery is different from LAIF tasks that are mainly LLM or generic
+PyTorch workflows. The benchmark package itself is a scientific Python stack
+(ASE, pymatgen, pandas, scipy, scikit-learn, plotting/export helpers), while many
+model calculators are PyTorch-based interatomic potentials. For that reason the
+best default base is the LAIF PyTorch container, not the full LAIF multi-framework
+image.
+
+Use a pinned LAIF PyTorch SIF when possible. The =latest= path is convenient for
+experiments but less reproducible.
 
 #+BEGIN_SRC bash
+export LAIF_BASE=/appl/local/laifs/containers/lumi-multitorch-latest.sif
 export PROJECT=<project>
+export SIF=/scratch/$PROJECT/$USER/lumi-matbench-discovery.sif
 #+END_SRC
 
-#+BEGIN_SRC bash
-export SIF=/scratch/$PROJECT/$USER/lumi-poppler.sif
-#+END_SRC
+* What gets installed
+
+The provided =matbench-lumi.def= creates =/opt/matbench-venv= with
+=--system-site-packages= so the environment can reuse the ROCm-enabled PyTorch
+already present in the LAIF base image.
+
+It installs:
+
+- =matbench-discovery[fetch-wbm-data,phonons]==1.3.1=
+- common scientific/runtime helpers used by ASE and pymatgen workflows
+- optional PyTorch model packages that are usually relevant for GPU relaxations:
+  =mace-torch= and =chgnet=
+
+The full =matbench-discovery[running-models]= extra intentionally is not installed
+by default. That extra pulls in a broad set of model ecosystems, including
+packages that may be CPU-only or have their own dependency constraints. Add those
+model families one at a time after deciding which leaderboard entry or calculator
+you need to run.
+
+* Build on LUMI
+
+Building containers requires memory, so run these commands on a LUMI login node
+and allocate resources before extending the container:
 
 #+BEGIN_SRC bash
 srun --account=$PROJECT --partition=small --ntasks=1 --cpus-per-task=8 --mem=120G --time=02:00:00 --nodes=1 --pty bash
 #+END_SRC
+
+From the allocated shell:
 
 #+BEGIN_SRC bash
 module purge
@@ -30,34 +62,72 @@ export SINGULARITY_TMPDIR=/tmp/$USER
 export SINGULARITY_CACHEDIR=/tmp/$USER
 #+END_SRC
 
-Create a definition file (e.g., =poppler-lumi.def=) where you define the packages to be installed:
+Build the new container:
 
 #+BEGIN_SRC bash
-Bootstrap: localimage
-From: /appl/local/laifs/containers/lumi-multitorch-latest.sif
-
-%post
-    apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y poppler-utils
-    apt-get clean
-    rm -rf /var/lib/apt/lists/*
+singularity build --build-arg LAIF_BASE=$LAIF_BASE $SIF matbench-lumi.def
 #+END_SRC
 
-Use Singularity to build the new container:
+If your Singularity/Apptainer build does not support =--build-arg=, edit the
+=From:= line in =matbench-lumi.def= and set it directly to your chosen LAIF SIF.
+
+* Smoke test
+
+Run the smoke test on a GPU node:
 
 #+BEGIN_SRC bash
-singularity build $SIF poppler-lumi.def
+srun --account=$PROJECT --partition=standard-g --gres=gpu:1 --ntasks=1 --cpus-per-task=8 --mem=32G --time=00:20:00 --pty bash
+
+singularity exec --rocm $SIF python /opt/matbench-smoke.py
 #+END_SRC
 
-From the allocated shell:
+The smoke test verifies:
+
+- Python can import =matbench_discovery=, =ase=, =pymatgen=, =numpy=, and =torch=
+- ROCm-enabled PyTorch can see the GPU
+- an ASE calculator can run a tiny relaxation-style energy/force calculation
+- optional =mace= and =chgnet= imports are visible if installed successfully
+
+* Running real benchmark jobs
+
+For real Matbench Discovery runs, keep the container separate from the workflow
+scripts and model checkpoints:
 
 #+BEGIN_SRC bash
-singularity exec $SIF pdftoppm -png sample.pdf sample
+export MATBENCH_WORK=/scratch/$PROJECT/$USER/matbench-discovery
+mkdir -p $MATBENCH_WORK/{data,models,results,logs}
+
+singularity exec --rocm \
+  --bind $MATBENCH_WORK:/work \
+  $SIF \
+  python -c 'import matbench_discovery as mbd; print(mbd.__version__)'
 #+END_SRC
+
+Recommended next steps:
+
+1. Choose one model family, for example MACE or CHGNet.
+2. Download/cache checkpoints under =$MATBENCH_WORK/models=.
+3. Run a 10-100 structure pilot job before launching a Slurm array over the full
+   WBM test set.
+4. Write compressed outputs under =$MATBENCH_WORK/results= in the format expected
+   by the Matbench Discovery contribution guide.
+5. Capture =pip freeze= from inside the container and store it with the outputs.
+
+* Notes on base image choice
+
+- Use LAIF PyTorch when running GPU model inference or ASE relaxations backed by
+  PyTorch calculators.
+- Use a smaller ROCm base only if you want to manage the PyTorch/ROCm stack
+  yourself.
+- Use a CPU-only Python container only for post-processing existing prediction
+  files.
+- Avoid the full LAIF image unless a specific model package needs one of its
+  extra frameworks.
 
 * References
+
 - [[https://docs.lumi-supercomputer.eu/software/containers/singularity/]]
 - [[https://docs.lumi-supercomputer.eu/laif/software/ai-environment/]]
-
-* Credits
-Original guide by Shanshan Wang. Updated by Anis Rahman.
+- [[https://matbench-discovery.materialsproject.org/]]
+- [[https://matbench-discovery.materialsproject.org/contribute]]
+- [[https://pypi.org/project/matbench-discovery/]]
