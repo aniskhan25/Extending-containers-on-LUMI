@@ -32,11 +32,10 @@ def main() -> None:
         print(f"torch.cuda.device_count: {torch.cuda.device_count()}")
         print(f"torch.cuda.device_name.0: {torch.cuda.get_device_name(0)}")
 
-    silicon = Structure.from_spacegroup(
-        "Fd-3m",
-        lattice=[[0, 2.715, 2.715], [2.715, 0, 2.715], [2.715, 2.715, 0]],
-        species=["Si"],
-        coords=[[0, 0, 0]],
+    silicon = Structure(
+        lattice=[[5.43, 0, 0], [0, 5.43, 0], [0, 0, 5.43]],
+        species=["Si", "Si"],
+        coords=[[0, 0, 0], [0.25, 0.25, 0.25]],
     )
     print(f"pymatgen_formula: {silicon.composition.reduced_formula}")
 
