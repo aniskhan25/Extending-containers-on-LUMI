@@ -42,16 +42,40 @@ From: {{ LAIF_BASE }}
         'mace-torch>=0.3.6' \
         'chgnet>=0.3.0'
 
+    python - <<'PY'
+from pathlib import Path
+from importlib.util import find_spec
+
+spec = find_spec("matbench_discovery")
+if spec is None or spec.origin is None:
+    raise SystemExit("matbench_discovery package not found after install")
+
+pkg_dir = Path(spec.origin).parent
+for rel_path in (
+    "data/mp",
+    "data/wbm",
+    "paper/figs",
+    "site/src/figs",
+    "site/src/lib",
+    "wandb/checkpoints",
+):
+    (pkg_dir / rel_path).mkdir(parents=True, exist_ok=True)
+PY
+
     python -m pip check
 
 %environment
     export PATH=/opt/matbench-venv/bin:$PATH
     export VIRTUAL_ENV=/opt/matbench-venv
     export PYTHONNOUSERSITE=1
+    export MPLCONFIGDIR=${MPLCONFIGDIR:-/tmp/matplotlib-${USER:-matbench}}
+    export XDG_CACHE_HOME=${XDG_CACHE_HOME:-/tmp/xdg-cache-${USER:-matbench}}
+    export MBD_CACHE_DIR=${MBD_CACHE_DIR:-/tmp/matbench-discovery-${USER:-matbench}}
     export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
 
 %runscript
     exec python "$@"
 
 %test
+    mkdir -p "$MPLCONFIGDIR" "$XDG_CACHE_HOME" "$MBD_CACHE_DIR"
     python /opt/matbench-smoke.py
