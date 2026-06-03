@@ -14,6 +14,9 @@ extras in a derived image when needed.
 
 #+BEGIN_SRC bash
 export PROJECT=<project>
+#+END_SRC
+
+#+BEGIN_SRC bash
 export LAIF_BASE=/appl/local/laifs/containers/lumi-multitorch-latest.sif
 export SIF=/scratch/$PROJECT/$USER/lumi-matbench-discovery.sif
 
