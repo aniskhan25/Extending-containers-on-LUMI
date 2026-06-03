@@ -46,11 +46,13 @@ Use a pinned LAIF base image instead of =latest= for reproducible builds.
 Build this only if you need MACE and CHGNet support:
 
 #+BEGIN_SRC bash
+export MATBENCH_BASE=/scratch/$PROJECT/$USER/lumi-matbench-discovery.sif
 export MODEL_SIF=/scratch/$PROJECT/$USER/lumi-matbench-mace-chgnet.sif
 #+END_SRC
 
 #+BEGIN_SRC bash
-singularity build --build-arg MATBENCH_BASE=$SIF $MODEL_SIF matbench-mace-chgnet-lumi.def
+test -f "$MATBENCH_BASE"
+singularity build --build-arg MATBENCH_BASE=$MATBENCH_BASE $MODEL_SIF matbench-mace-chgnet-lumi.def
 #+END_SRC
 
 Use =$MODEL_SIF= instead of =$SIF= in the run or smoke-test commands for this
