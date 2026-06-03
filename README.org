@@ -43,9 +43,6 @@ Use a pinned LAIF base image instead of =latest= for reproducible builds.
 
 * Run
 
-Do not add =--rocm=. LAIF containers already include the matching ROCm/PyTorch
-stack; =--rocm= can inject incompatible host ROCm libraries.
-
 #+BEGIN_SRC bash
 module purge
 module use /appl/local/laifs/modules
