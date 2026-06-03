@@ -19,9 +19,13 @@ export PROJECT=<project>
 #+BEGIN_SRC bash
 export LAIF_BASE=/appl/local/laifs/containers/lumi-multitorch-latest.sif
 export SIF=/scratch/$PROJECT/$USER/lumi-matbench-discovery.sif
+#+END_SRC
 
+#+BEGIN_SRC bash
 srun --account=$PROJECT --partition=small --ntasks=1 --cpus-per-task=8 --mem=120G --time=02:00:00 --nodes=1 --pty bash
+#+END_SRC
 
+#+BEGIN_SRC bash
 module purge
 module load CrayEnv
 module load PRoot
@@ -29,7 +33,9 @@ module load PRoot
 mkdir -p /tmp/$USER
 export SINGULARITY_TMPDIR=/tmp/$USER
 export SINGULARITY_CACHEDIR=/tmp/$USER
+#+END_SRC
 
+#+BEGIN_SRC bash
 singularity build --build-arg LAIF_BASE=$LAIF_BASE $SIF matbench-lumi.def
 #+END_SRC
 
@@ -44,13 +50,21 @@ stack; =--rocm= can inject incompatible host ROCm libraries.
 module purge
 module use /appl/local/laifs/modules
 module load lumi-aif-singularity-bindings
+#+END_SRC
 
+#+BEGIN_SRC bash
 singularity exec $SIF python -c 'import matbench_discovery as mbd; print(mbd.__version__)'
 #+END_SRC
 
 * Smoke Test
 
 The smoke test lives in this repo, not inside the SIF:
+
+#+BEGIN_SRC bash
+module purge
+module use /appl/local/laifs/modules
+module load lumi-aif-singularity-bindings
+#+END_SRC
 
 #+BEGIN_SRC bash
 singularity exec \
