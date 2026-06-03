@@ -1,0 +1,36 @@
+Bootstrap: localimage
+From: {{ MATBENCH_BASE }}
+
+%arguments
+    MATBENCH_BASE=lumi-matbench-discovery.sif
+
+%labels
+    Author Anis Rahman
+    Description Matbench Discovery container extended with MACE and CHGNet
+
+%post
+    set -eux
+
+    . /opt/matbench-venv/bin/activate
+
+    python -m pip install --no-cache-dir \
+        'mace-torch>=0.3.6' \
+        'chgnet>=0.3.0'
+
+    python -m pip check
+
+%test
+    mkdir -p "$MPLCONFIGDIR" "$MBD_CACHE_DIR"
+    python - <<'PY'
+import importlib
+import torch
+
+for module_name in ("matbench_discovery", "mace", "chgnet"):
+    module = importlib.import_module(module_name)
+    print(f"{module_name}: {getattr(module, '__version__', 'unknown')}")
+
+print(f"torch: {torch.__version__}")
+print(f"torch.cuda.is_available: {torch.cuda.is_available()}")
+if "+rocm" not in torch.__version__:
+    raise SystemExit("expected LAIF ROCm PyTorch to remain visible")
+PY

@@ -41,6 +41,21 @@ singularity build --build-arg LAIF_BASE=$LAIF_BASE $SIF matbench-lumi.def
 
 Use a pinned LAIF base image instead of =latest= for reproducible builds.
 
+* Optional Model Image
+
+Build this only if you need MACE and CHGNet support:
+
+#+BEGIN_SRC bash
+export MODEL_SIF=/scratch/$PROJECT/$USER/lumi-matbench-mace-chgnet.sif
+#+END_SRC
+
+#+BEGIN_SRC bash
+singularity build --build-arg MATBENCH_BASE=$SIF $MODEL_SIF matbench-mace-chgnet-lumi.def
+#+END_SRC
+
+Use =$MODEL_SIF= instead of =$SIF= in the run or smoke-test commands for this
+image.
+
 * Run
 
 #+BEGIN_SRC bash
