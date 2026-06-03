@@ -35,18 +35,13 @@ a finished SIF is read-only. Runtime cache variables such as =MPLCONFIGDIR= are
 set to writable =/tmp= locations to avoid Matplotlib and cache writes under a
 read-only home directory.
 
-It installs:
+It installs only =matbench-discovery==1.3.1= and the dependencies pulled by that
+package.
 
-- =matbench-discovery[fetch-wbm-data,phonons]==1.3.1=
-- common scientific/runtime helpers used by ASE and pymatgen workflows
-- optional PyTorch model packages that are usually relevant for GPU relaxations:
-  =mace-torch= and =chgnet=
-
-The full =matbench-discovery[running-models]= extra intentionally is not installed
-by default. That extra pulls in a broad set of model ecosystems, including
-packages that may be CPU-only or have their own dependency constraints. Add those
-model families one at a time after deciding which leaderboard entry or calculator
-you need to run.
+Optional extras such as =fetch-wbm-data= and =phonons=, and model-specific
+packages such as =mace-torch= or =chgnet=, are intentionally not installed by
+default. Add them in a model-specific definition file after deciding which
+leaderboard entry or calculator you need to run.
 
 * Build on LUMI
 
@@ -104,7 +99,8 @@ The smoke test verifies:
 - Python can import =matbench_discovery=, =ase=, =pymatgen=, =numpy=, and =torch=
 - ROCm-enabled PyTorch can see the GPU
 - an ASE calculator can run a tiny relaxation-style energy/force calculation
-- optional =mace= and =chgnet= imports are visible if installed successfully
+- optional =mace= and =chgnet= imports report whether model-specific packages
+  were added in a derived image
 
 * Running real benchmark jobs
 
@@ -128,12 +124,13 @@ singularity exec \
 Recommended next steps:
 
 1. Choose one model family, for example MACE or CHGNet.
-2. Download/cache checkpoints under =$MATBENCH_WORK/models=.
-3. Run a 10-100 structure pilot job before launching a Slurm array over the full
+2. Build a derived image that adds only that model's package dependencies.
+3. Download/cache checkpoints under =$MATBENCH_WORK/models=.
+4. Run a 10-100 structure pilot job before launching a Slurm array over the full
    WBM test set.
-4. Write compressed outputs under =$MATBENCH_WORK/results= in the format expected
+5. Write compressed outputs under =$MATBENCH_WORK/results= in the format expected
    by the Matbench Discovery contribution guide.
-5. Capture =pip freeze= from inside the container and store it with the outputs.
+6. Capture =pip freeze= from inside the container and store it with the outputs.
 
 * Notes on base image choice
 
