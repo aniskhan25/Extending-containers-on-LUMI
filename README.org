@@ -1,120 +1,14 @@
 #+TITLE: Extending LAIF Containers on LUMI
-#+AUTHOR: Shanshan Wang, Anis Rahman
+#+AUTHOR: Anis Rahman
 #+OPTIONS: toc:nil
 #+OPTIONS: num:nil
 
 Examples of extending the LUMI AI Factory (LAIF) PyTorch Singularity container
 with additional Python packages.
 
-| Container definition        | Purpose                                      |
-|-----------------------------+----------------------------------------------|
-| =matbench-lumi.def=         | Matbench Discovery 1.3.1                     |
-| =matbench-mace-chgnet-lumi.def= | MACE and CHGNet (extends matbench image) |
-| =sglang-lumi.def=           | SGLang inference server (MI250x, experimental) |
-
-* Matbench Discovery
-
-This extends a LUMI AI Factory PyTorch container with
-=matbench-discovery==1.3.1=.
-
-The image is intentionally minimal. It installs the Matbench Discovery framework
-only. Add model-specific packages such as =mace-torch=, =chgnet=, or phonon
-extras in a derived image when needed.
-
-* Build
-
-#+BEGIN_SRC bash
-export PROJECT=<project>
-#+END_SRC
-
-#+BEGIN_SRC bash
-export LAIF_BASE=/appl/local/laifs/containers/lumi-multitorch-latest.sif
-export SIF=/scratch/$PROJECT/$USER/lumi-matbench-discovery.sif
-#+END_SRC
-
-#+BEGIN_SRC bash
-srun --account=$PROJECT --partition=small --ntasks=1 --cpus-per-task=8 --mem=120G --time=02:00:00 --nodes=1 --pty bash
-#+END_SRC
-
-#+BEGIN_SRC bash
-module purge
-module load CrayEnv
-module load PRoot
-
-mkdir -p /tmp/$USER
-export SINGULARITY_TMPDIR=/tmp/$USER
-export SINGULARITY_CACHEDIR=/tmp/$USER
-#+END_SRC
-
-#+BEGIN_SRC bash
-singularity build --build-arg LAIF_BASE=$LAIF_BASE $SIF matbench-lumi.def
-#+END_SRC
-
-Use a pinned LAIF base image instead of =latest= for reproducible builds.
-
-* Optional Model Image
-
-Build this only if you need MACE and CHGNet support:
-
-#+BEGIN_SRC bash
-export MATBENCH_BASE=/scratch/$PROJECT/$USER/lumi-matbench-discovery.sif
-export MODEL_SIF=/scratch/$PROJECT/$USER/lumi-matbench-mace-chgnet.sif
-#+END_SRC
-
-#+BEGIN_SRC bash
-test -f "$MATBENCH_BASE"
-singularity build --build-arg MATBENCH_BASE=$MATBENCH_BASE $MODEL_SIF matbench-mace-chgnet-lumi.def
-#+END_SRC
-
-Use =$MODEL_SIF= instead of =$SIF= in the run or smoke-test commands for this
-image.
-
-* Run
-
-#+BEGIN_SRC bash
-module purge
-module use /appl/local/laifs/modules
-module load lumi-aif-singularity-bindings
-#+END_SRC
-
-#+BEGIN_SRC bash
-singularity exec $SIF python -c 'import matbench_discovery as mbd; print(mbd.__version__)'
-#+END_SRC
-
-* Smoke Test
-
-The smoke test lives in this repo, not inside the SIF:
-
-#+BEGIN_SRC bash
-module purge
-module use /appl/local/laifs/modules
-module load lumi-aif-singularity-bindings
-#+END_SRC
-
-#+BEGIN_SRC bash
-singularity exec \
-  --bind "$PWD:/repo" \
-  $SIF \
-  python /repo/scripts/matbench-smoke.py
-#+END_SRC
-
-Run it on a GPU allocation if you want to confirm GPU visibility. On CPU nodes,
-=torch.cuda.is_available()= should print =False= and continue.
-
-* Notes
-
-- =matbench-lumi.def= creates =/opt/matbench-venv= with
-  =--system-site-packages= so it can reuse LAIF's ROCm-enabled PyTorch.
-- Matbench Discovery 1.3.1 creates package-local directories at import time; the
-  definition pre-creates them while the image is still writable.
-- =MPLCONFIGDIR= and =MBD_CACHE_DIR= point to =/tmp= to avoid writes under
-  read-only home/package paths.
-
-* References
-
-- [[https://docs.lumi-supercomputer.eu/software/containers/singularity/]]
-- [[https://docs.lumi-supercomputer.eu/laif/software/ai-environment/]]
-- [[https://matbench-discovery.materialsproject.org/]]
+| Container definition | Purpose                                        |
+|----------------------+------------------------------------------------|
+| =sglang-lumi.def=    | SGLang inference server (MI250x, experimental) |
 
 * SGLang on LUMI (Experimental)
 
@@ -229,8 +123,10 @@ For a SLURM batch job see =scripts/sglang-serve.sh=.
 For Option B (pip-containerize), see the =SUCCESS= output printed by the
 install script for the exact launch command.
 
-** SGLang References
+** References
 
+- [[https://docs.lumi-supercomputer.eu/software/containers/singularity/]]
+- [[https://docs.lumi-supercomputer.eu/laif/software/ai-environment/]]
 - [[https://docs.sglang.io/platforms/amd_gpu.html][SGLang AMD GPU docs]]
 - [[https://github.com/ROCm/aiter/issues/179][ROCm/aiter#179 — gfx90a FP8 build failure]]
 - [[https://rocm.docs.amd.com/en/latest/compatibility/ml-compatibility/flashinfer-compatibility.html][FlashInfer ROCm compatibility matrix]]
