@@ -179,9 +179,22 @@ curl -s http://localhost:30000/v1/chat/completions \
 
 You should see a JSON response with the reply in =choices[0].message.content=.
 
-To run the server in the background instead (frees the terminal):
+To run the server in the background instead (frees the terminal).  Note
+that environment variables are not inherited across =srun --overlap= shells,
+so re-export them before launching:
 
 #+BEGIN_SRC bash
+export SIF=/scratch/$PROJECT/$USER/lumi-sglang.sif
+export MODEL=/scratch/$PROJECT/$USER/models/Llama-3.1-8B-Instruct
+
+module purge
+module use /appl/local/laifs/modules
+module load lumi-aif-singularity-bindings
+
+MIOPEN_DIR=$(mktemp -d)
+export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_DIR/cache
+export MIOPEN_USER_DB=$MIOPEN_DIR/config
+
 singularity exec \
   ${HF_TOKEN:+--env HF_TOKEN=$HF_TOKEN} \
   "$SIF" \
