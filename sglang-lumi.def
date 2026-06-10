@@ -48,15 +48,27 @@ From: {{ LAIF_BASE }}
     # --no-build-isolation exposes the venv's ROCm PyTorch to any C extensions.
     pip install --no-cache-dir --no-build-isolation "./python[all_hip]"
 
-    # ── build sgl-kernel from source for ROCm ───────────────────────────────
-    # pyproject_other.toml removes sgl-kernel (the PyPI wheel is CUDA-only),
-    # but SGLang's Python code still imports sgl_kernel unconditionally.
-    # Build the ROCm variant from the sgl-kernel subdirectory in the same repo.
-    # scikit_build_core and cmake must be pre-installed because --no-build-isolation
-    # skips the automatic build-dependency install.
-    pip install --no-cache-dir scikit-build-core cmake ninja
-    GPU_ARCHS=gfx90a \
-    pip install --no-cache-dir --no-build-isolation "./sgl-kernel"
+    # ── sgl_kernel stub for ROCm ────────────────────────────────────────────
+    # pyproject_other.toml removes sgl-kernel because the PyPI wheel is
+    # CUDA-only and the source build requires nvcc (its CMakeLists.txt declares
+    # CUDA as the project language and fails without it).
+    # SGLang still imports sgl_kernel unconditionally in several files, but the
+    # actual kernel calls are guarded by is_hip() checks — the compiled kernels
+    # are not invoked on the ROCm code path (Triton/petit_kernel handle those
+    # operations instead).  A minimal stub satisfies the import.
+    python - <<'PY'
+from pathlib import Path
+import sglang
+
+stub_dir = Path(sglang.__file__).parent.parent / "sgl_kernel"
+stub_dir.mkdir(exist_ok=True)
+(stub_dir / "__init__.py").write_text(
+    "# Stub for MI250x/gfx90a: sgl-kernel requires nvcc and cannot be built\n"
+    "# on ROCm-only systems.  SGLang's ROCm code paths use Triton/petit_kernel\n"
+    "# instead of these compiled kernels.\n"
+)
+print(f"Created sgl_kernel stub at {stub_dir}")
+PY
 
     # ── patch get_amdgpu_memory_capacity for MI250x ─────────────────────────
     # SGLang queries GPU memory via `rocminfo | grep ... | awk ...` during

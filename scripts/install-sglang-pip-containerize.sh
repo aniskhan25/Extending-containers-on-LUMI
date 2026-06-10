@@ -88,10 +88,23 @@ mv python/pyproject_other.toml python/pyproject.toml
 # time.  Skipping them produces an install that imports but fails on inference.
 python -m pip install --no-build-isolation "./python[all_hip]"
 
-# Build sgl-kernel from source — the PyPI wheel is CUDA-only, but SGLang's
-# Python code imports sgl_kernel unconditionally even on the ROCm path.
-python -m pip install scikit-build-core cmake ninja
-GPU_ARCHS=gfx90a python -m pip install --no-build-isolation "./sgl-kernel"
+# Install a sgl_kernel stub — the PyPI wheel is CUDA-only and the source
+# build requires nvcc (CMakeLists.txt declares CUDA as the project language).
+# SGLang imports sgl_kernel unconditionally but the actual kernel calls are
+# guarded by is_hip() checks; Triton/petit_kernel handle those on ROCm.
+python - <<'PY'
+from pathlib import Path
+import sglang
+
+stub_dir = Path(sglang.__file__).parent.parent / "sgl_kernel"
+stub_dir.mkdir(exist_ok=True)
+(stub_dir / "__init__.py").write_text(
+    "# Stub for MI250x/gfx90a: sgl-kernel requires nvcc and cannot be built\n"
+    "# on ROCm-only systems.  SGLang's ROCm code paths use Triton/petit_kernel\n"
+    "# instead of these compiled kernels.\n"
+)
+print(f"Created sgl_kernel stub at {stub_dir}")
+PY
 
 # Patch get_amdgpu_memory_capacity for MI250x/gfx90a.
 # rocminfo output does not match SGLang's grep pattern on this architecture,
