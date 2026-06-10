@@ -110,16 +110,6 @@ gated models).
 
 For a SLURM batch job see =scripts/sglang-serve.sh=.
 
-** Known Bad Pattern (Do Not Use)
-
-#+BEGIN_SRC bash
-# WRONG — --no-deps skips petit_kernel, wave-lang, and other runtime deps
-python -m pip install --no-deps "$SRC_DIR/sglang/python"
-#+END_SRC
-
-The package imports but model inference fails.  Always install with the
-=all_hip= extra and without =--no-deps=.
-
 ** References
 
 - [[https://docs.lumi-supercomputer.eu/software/containers/singularity/]]
