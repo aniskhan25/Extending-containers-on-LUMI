@@ -52,6 +52,9 @@ From: {{ LAIF_BASE }}
     # pyproject_other.toml removes sgl-kernel (the PyPI wheel is CUDA-only),
     # but SGLang's Python code still imports sgl_kernel unconditionally.
     # Build the ROCm variant from the sgl-kernel subdirectory in the same repo.
+    # scikit_build_core and cmake must be pre-installed because --no-build-isolation
+    # skips the automatic build-dependency install.
+    pip install --no-cache-dir scikit-build-core cmake ninja
     GPU_ARCHS=gfx90a \
     pip install --no-cache-dir --no-build-isolation "./sgl-kernel"
 

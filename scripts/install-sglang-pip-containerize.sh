@@ -90,6 +90,7 @@ python -m pip install --no-build-isolation "./python[all_hip]"
 
 # Build sgl-kernel from source — the PyPI wheel is CUDA-only, but SGLang's
 # Python code imports sgl_kernel unconditionally even on the ROCm path.
+python -m pip install scikit-build-core cmake ninja
 GPU_ARCHS=gfx90a python -m pip install --no-build-isolation "./sgl-kernel"
 
 # Patch get_amdgpu_memory_capacity for MI250x/gfx90a.
