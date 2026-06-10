@@ -126,7 +126,8 @@ singularity exec \
     --host 0.0.0.0 \
     --port 30000 \
     --tp-size 1 \
-    --attention-backend triton
+    --attention-backend triton \
+    --disable-cuda-graph
 #+END_SRC
 
 Set =--tp-size= to match the number of GPUs allocated.  Use a local model

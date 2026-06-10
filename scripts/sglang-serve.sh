@@ -53,4 +53,5 @@ singularity exec \
         --port "$PORT" \
         --tensor-parallel-size 8 \
         --attention-backend triton \
+        --disable-cuda-graph \
         --device cuda
