@@ -48,6 +48,13 @@ From: {{ LAIF_BASE }}
     # --no-build-isolation exposes the venv's ROCm PyTorch to any C extensions.
     pip install --no-cache-dir --no-build-isolation "./python[all_hip]"
 
+    # ── build sgl-kernel from source for ROCm ───────────────────────────────
+    # pyproject_other.toml removes sgl-kernel (the PyPI wheel is CUDA-only),
+    # but SGLang's Python code still imports sgl_kernel unconditionally.
+    # Build the ROCm variant from the sgl-kernel subdirectory in the same repo.
+    GPU_ARCHS=gfx90a \
+    pip install --no-cache-dir --no-build-isolation "./sgl-kernel"
+
     # ── patch get_amdgpu_memory_capacity for MI250x ─────────────────────────
     # SGLang queries GPU memory via `rocminfo | grep ... | awk ...` during
     # argument parsing.  On MI250x/gfx90a the rocminfo output format does not

@@ -88,6 +88,10 @@ mv python/pyproject_other.toml python/pyproject.toml
 # time.  Skipping them produces an install that imports but fails on inference.
 python -m pip install --no-build-isolation "./python[all_hip]"
 
+# Build sgl-kernel from source — the PyPI wheel is CUDA-only, but SGLang's
+# Python code imports sgl_kernel unconditionally even on the ROCm path.
+GPU_ARCHS=gfx90a python -m pip install --no-build-isolation "./sgl-kernel"
+
 # Patch get_amdgpu_memory_capacity for MI250x/gfx90a.
 # rocminfo output does not match SGLang's grep pattern on this architecture,
 # producing float('') -> ValueError.  The except only catches FileNotFoundError,
