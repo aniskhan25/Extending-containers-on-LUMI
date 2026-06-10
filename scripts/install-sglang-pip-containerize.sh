@@ -112,7 +112,10 @@ new = '''    except (FileNotFoundError, ValueError):
                 "falling back to torch.cuda.mem_get_info()."
             )
             return torch.cuda.mem_get_info()[1] // 1024 // 1024  # unit: MB
-        raise RuntimeError("Cannot determine AMD GPU memory capacity.")'''
+        raise RuntimeError(
+            "Cannot determine AMD GPU memory capacity. "
+            "Ensure you have a GPU allocation (--gpus-per-node in srun/sbatch)."
+        )'''
 
 assert old in src, f"Patch target not found in {path} — check SGLang version"
 path.write_text(src.replace(old, new, 1))
