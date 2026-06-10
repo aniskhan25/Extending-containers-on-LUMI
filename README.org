@@ -104,3 +104,103 @@ Run it on a GPU allocation if you want to confirm GPU visibility. On CPU nodes,
 - [[https://docs.lumi-supercomputer.eu/software/containers/singularity/]]
 - [[https://docs.lumi-supercomputer.eu/laif/software/ai-environment/]]
 - [[https://matbench-discovery.materialsproject.org/]]
+
+* SGLang on LUMI (Experimental)
+
+=sglang-lumi.def= extends the LAIF PyTorch base with
+[[https://github.com/sgl-project/sglang][SGLang]] built from source.
+
+** Status and Caveats
+
+SGLang does *not* officially support MI250x (=gfx90a=/CDNA2) as of mid-2025.
+The official ROCm targets are MI300X (=gfx942=) and MI350X (=gfx950=).
+Two workarounds are required:
+
+1. *=aiter= build failure on gfx90a* ([[https://github.com/ROCm/aiter/issues/179][ROCm/aiter#179]]): the =aiter=
+   dependency compiles FP8 kernels by default, but MI250x has no native FP8
+   support.  Setting =CK_USE_FP8_ON_UNSUPPORTED_ARCH=ON= allows the build to
+   proceed via a compatibility path in =composable_kernel=.
+
+2. *No FlashInfer support on MI250x*: FlashInfer's ROCm builds only cover
+   MI300X, MI325X, and MI355X.  The Triton attention backend
+   (=--attention-backend triton=) is used instead.
+
+Expect reduced throughput compared to MI300X.  FP8-quantised models may show
+accuracy differences.  Test before production use.
+
+** Build
+
+#+BEGIN_SRC bash
+export PROJECT=<project>
+#+END_SRC
+
+#+BEGIN_SRC bash
+export LAIF_BASE=/appl/local/laifs/containers/lumi-multitorch-latest.sif
+export SIF=/scratch/$PROJECT/$USER/lumi-sglang.sif
+#+END_SRC
+
+Request a CPU build node with enough memory (the =aiter= compilation is heavy):
+
+#+BEGIN_SRC bash
+srun --account=$PROJECT --partition=small --ntasks=1 --cpus-per-task=16 --mem=120G --time=04:00:00 --nodes=1 --pty bash
+#+END_SRC
+
+#+BEGIN_SRC bash
+module purge
+module load CrayEnv
+module load PRoot
+
+mkdir -p /tmp/$USER
+export SINGULARITY_TMPDIR=/tmp/$USER
+export SINGULARITY_CACHEDIR=/tmp/$USER
+#+END_SRC
+
+#+BEGIN_SRC bash
+singularity build --build-arg LAIF_BASE=$LAIF_BASE $SIF sglang-lumi.def
+#+END_SRC
+
+To pin a specific SGLang release (recommended for reproducibility):
+
+#+BEGIN_SRC bash
+singularity build \
+  --build-arg LAIF_BASE=$LAIF_BASE \
+  --build-arg SGLANG_VERSION=v0.4.5 \
+  $SIF sglang-lumi.def
+#+END_SRC
+
+** Run
+
+#+BEGIN_SRC bash
+module purge
+module use /appl/local/laifs/modules
+module load lumi-aif-singularity-bindings
+#+END_SRC
+
+Launch an OpenAI-compatible server (8 GPUs, tensor-parallel):
+
+#+BEGIN_SRC bash
+singularity exec \
+  --env HF_TOKEN=$HF_TOKEN \
+  $SIF \
+  python -m sglang.launch_server \
+    --model-path meta-llama/Llama-3.1-8B-Instruct \
+    --host 0.0.0.0 \
+    --port 30000 \
+    --tensor-parallel-size 8 \
+    --attention-backend triton \
+    --device cuda
+#+END_SRC
+
+For a SLURM batch job see =scripts/sglang-serve.sh=.
+
+** Smoke Test
+
+#+BEGIN_SRC bash
+singularity exec $SIF python -c "import sglang; print(sglang.__version__)"
+#+END_SRC
+
+** SGLang References
+
+- [[https://docs.sglang.io/platforms/amd_gpu.html][SGLang AMD GPU docs]]
+- [[https://github.com/ROCm/aiter/issues/179][ROCm/aiter#179 — gfx90a FP8 build failure]]
+- [[https://rocm.docs.amd.com/en/latest/compatibility/ml-compatibility/flashinfer-compatibility.html][FlashInfer ROCm compatibility matrix]]
