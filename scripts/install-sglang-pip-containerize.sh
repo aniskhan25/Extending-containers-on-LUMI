@@ -117,14 +117,21 @@ aiter_dir = Path(sglang.__file__).parent.parent / "aiter"
 aiter_dir.mkdir(exist_ok=True)
 (aiter_dir / "__init__.py").write_text(
     "# Stub for MI250x/gfx90a: aiter fails to build for gfx90a (ROCm/aiter#179).\n"
-    "# SGLANG_USE_AITER=0 disables aiter at runtime; this stub satisfies imports.\n"
+    "# SGLANG_USE_AITER=0 disables aiter at runtime but some files import\n"
+    "# aiter submodules (e.g. aiter.ops) unconditionally at the top level.\n"
+    "# __getattr__ registers a stub submodule in sys.modules on first access\n"
+    "# so that 'import aiter.ops' and 'from aiter.ops import x' both resolve.\n"
+    "import sys, types\n"
+    "\n"
+    "def _make_stub(fullname):\n"
+    "    mod = types.ModuleType(fullname)\n"
+    "    mod.__package__ = fullname\n"
+    "    mod.__getattr__ = lambda name: _make_stub(f'{fullname}.{name}')\n"
+    "    sys.modules[fullname] = mod\n"
+    "    return mod\n"
+    "\n"
     "def __getattr__(name):\n"
-    "    def _stub(*args, **kwargs):\n"
-    "        raise NotImplementedError(\n"
-    "            f'aiter.{name} is not available on MI250x/gfx90a. '\n"
-    "            f'Set SGLANG_USE_AITER=0 (already set in this container).'\n"
-    "        )\n"
-    "    return _stub\n"
+    "    return _make_stub(f'aiter.{name}')\n"
 )
 print(f"Created aiter stub at {aiter_dir}")
 PY
