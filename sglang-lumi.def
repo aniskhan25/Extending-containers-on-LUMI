@@ -153,6 +153,37 @@ aiter_dir.mkdir(exist_ok=True)
 print(f"Created aiter stub at {aiter_dir}")
 PY
 
+    # ── patch CustomOp.forward_hip base class ───────────────────────────────
+    # custom_op.py's default forward_hip delegates to forward_cuda, which calls
+    # sgl_kernel functions (e.g. silu_and_mul).  sgl_kernel is a stub — its
+    # attributes are stub module objects, not callables — so any custom op that
+    # doesn't override forward_hip (e.g. SiluAndMul, GeluAndMul, etc.) crashes
+    # at inference with "TypeError: 'module' object is not callable".
+    # Redirect the base forward_hip to forward_native (pure PyTorch) so all
+    # custom ops use the safe fallback path on ROCm/MI250x.
+    python - <<'PY'
+import re
+from pathlib import Path
+import sglang.srt.custom_op as m
+
+path = Path(m.__file__)
+src = path.read_text()
+
+# Match the base-class forward_hip that unconditionally delegates to forward_cuda.
+# This is the only occurrence of "return self.forward_cuda" inside forward_hip.
+old = '        return self.forward_cuda(*args, **kwargs)'
+new = (
+    '        # sgl_kernel (CUDA-only) is a stub on ROCm/MI250x; '
+    'forward_cuda calls sgl_kernel\n'
+    '        # functions that are not callable. Fall back to the pure-PyTorch native path.\n'
+    '        return self.forward_native(*args, **kwargs)'
+)
+
+assert old in src, f"Patch target not found in {path} — check SGLang version"
+path.write_text(src.replace(old, new, 1))
+print(f"Patched CustomOp.forward_hip -> forward_native in {path}")
+PY
+
     # ── patch forward_hip in layernorm.py ───────────────────────────────────
     # forward_hip calls fused_add_rms_norm with 6 args but the LAIF container's
     # vLLM version expects 4, causing TypeError at inference time.

@@ -175,6 +175,31 @@ aiter_dir.mkdir(exist_ok=True)
 print(f"Created aiter stub at {aiter_dir}")
 PY
 
+# Patch CustomOp.forward_hip base class in custom_op.py.
+# The default forward_hip delegates to forward_cuda, which calls sgl_kernel
+# functions.  sgl_kernel is a stub whose attributes are module objects, not
+# callables, so any unoverridden custom op (SiluAndMul, GeluAndMul, etc.)
+# crashes at inference with "TypeError: 'module' object is not callable".
+python - <<'PY'
+from pathlib import Path
+import sglang.srt.custom_op as m
+
+path = Path(m.__file__)
+src = path.read_text()
+
+old = '        return self.forward_cuda(*args, **kwargs)'
+new = (
+    '        # sgl_kernel (CUDA-only) is a stub on ROCm/MI250x; '
+    'forward_cuda calls sgl_kernel\n'
+    '        # functions that are not callable. Fall back to the pure-PyTorch native path.\n'
+    '        return self.forward_native(*args, **kwargs)'
+)
+
+assert old in src, f"Patch target not found in {path} — check SGLang version"
+path.write_text(src.replace(old, new, 1))
+print(f"Patched CustomOp.forward_hip -> forward_native in {path}")
+PY
+
 # Patch get_amdgpu_memory_capacity for MI250x/gfx90a.
 # rocminfo output does not match SGLang's grep pattern on this architecture,
 # producing float('') -> ValueError.  The except only catches FileNotFoundError,
