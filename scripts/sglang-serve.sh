@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=sglang-serve
 #SBATCH --account=<project>
-#SBATCH --partition=gpu
+#SBATCH --partition=dev-g
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=7

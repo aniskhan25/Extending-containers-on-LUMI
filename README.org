@@ -66,7 +66,7 @@ singularity build --build-arg LAIF_BASE=$LAIF_BASE $SIF sglang-lumi.def
 ** Step 2 — Get a GPU allocation
 
 #+BEGIN_SRC bash
-srun --account=$PROJECT --partition=standard-g \
+srun --account=$PROJECT --partition=dev-g \
      --nodes=1 --ntasks=1 --cpus-per-task=7 \
      --gpus-per-node=1 --mem=120G \
      --time=01:00:00 --pty bash
