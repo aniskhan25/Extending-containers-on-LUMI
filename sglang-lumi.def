@@ -153,6 +153,52 @@ aiter_dir.mkdir(exist_ok=True)
 print(f"Created aiter stub at {aiter_dir}")
 PY
 
+    # ── patch forward_hip in layernorm.py ───────────────────────────────────
+    # forward_hip calls fused_add_rms_norm with 6 args but the LAIF container's
+    # vLLM version expects 4, causing TypeError at inference time.
+    # Redirect forward_hip to forward_native (pure PyTorch) which always works.
+    python - <<'PY'
+from pathlib import Path
+import sglang.srt.layers.layernorm as m
+
+path = Path(m.__file__)
+src = path.read_text()
+
+old = '''\
+    def forward_hip(
+        self,
+        x: torch.Tensor,
+        residual: Optional[torch.Tensor] = None,
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        if not x.is_contiguous():
+            # NOTE: Remove this if aiter kernel supports discontinuous input
+            x = x.contiguous()
+        if residual is not None:
+            out = torch.empty_like(x)
+            residual_out = torch.empty_like(x)
+            fused_add_rms_norm(
+                out, x, residual_out, residual, self.weight.data, self.variance_epsilon
+            )
+            return out, residual_out
+        out = torch.empty_like(x)
+        rms_norm(out, x, self.weight.data, self.variance_epsilon)
+        return out'''
+
+new = '''\
+    def forward_hip(
+        self,
+        x: torch.Tensor,
+        residual: Optional[torch.Tensor] = None,
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+        # fused_add_rms_norm in the LAIF container vLLM expects 4 args but
+        # SGLang calls it with 6. Delegate to forward_native (pure PyTorch).
+        return self.forward_native(x, residual)'''
+
+assert old in src, f"Patch target not found in {path} — check SGLang version"
+path.write_text(src.replace(old, new, 1))
+print(f"Patched forward_hip -> forward_native in {path}")
+PY
+
     # ── patch get_amdgpu_memory_capacity for MI250x ─────────────────────────
     # SGLang queries GPU memory via `rocminfo | grep ... | awk ...` during
     # argument parsing.  On MI250x/gfx90a the rocminfo output format does not
