@@ -112,6 +112,21 @@ stub_dir.mkdir(exist_ok=True)
     "    return _stub\n"
 )
 print(f"Created sgl_kernel stub at {stub_dir}")
+
+aiter_dir = Path(sglang.__file__).parent.parent / "aiter"
+aiter_dir.mkdir(exist_ok=True)
+(aiter_dir / "__init__.py").write_text(
+    "# Stub for MI250x/gfx90a: aiter fails to build for gfx90a (ROCm/aiter#179).\n"
+    "# SGLANG_USE_AITER=0 disables aiter at runtime; this stub satisfies imports.\n"
+    "def __getattr__(name):\n"
+    "    def _stub(*args, **kwargs):\n"
+    "        raise NotImplementedError(\n"
+    "            f'aiter.{name} is not available on MI250x/gfx90a. '\n"
+    "            f'Set SGLANG_USE_AITER=0 (already set in this container).'\n"
+    "        )\n"
+    "    return _stub\n"
+)
+print(f"Created aiter stub at {aiter_dir}")
 PY
 
 # Patch get_amdgpu_memory_capacity for MI250x/gfx90a.
