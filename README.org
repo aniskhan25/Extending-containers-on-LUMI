@@ -12,15 +12,6 @@ with additional Python packages.
 
 * SGLang on LUMI (Experimental)
 
-Two files cover SGLang support:
-
-- =sglang-lumi.def= — Singularity image built with =singularity build=
-- =scripts/install-sglang-pip-containerize.sh= — alternative using LUMI's
-  =lumi-container-wrapper= (=pip-containerize=); closer to how vLLM is
-  installed on LUMI today
-
-Both use the same underlying technique described below.
-
 ** Status and Caveats
 
 SGLang does *not* officially support MI250x (=gfx90a=/CDNA2).  The official
@@ -30,44 +21,28 @@ ROCm targets are MI300X (=gfx942=) and MI350X (=gfx950=).  Two issues apply:
    =pyproject.toml= pulls in =aiter=, whose =composable_kernel= build includes
    FP8 kernels that gfx90a does not support, causing a build failure.
    SGLang ships =pyproject_other.toml= as the AMD variant, which removes
-   =aiter= (and all other CUDA/NVIDIA-only deps) entirely.  Swapping this file
-   in before =pip install= is the correct fix.  The =SGLANG_USE_AITER=0=
-   runtime env var ensures aiter paths are disabled if they were somehow
-   present.
+   =aiter= (and all other CUDA/NVIDIA-only deps) entirely.
 
 2. *No FlashInfer on MI250x*: FlashInfer's ROCm builds cover MI300X/MI325X/
-   MI355X only.  =pyproject_other.toml= does not install FlashInfer.  The
-   Triton attention backend (=SGLANG_ATTENTION_BACKEND=triton=) is used
-   instead.
+   MI355X only.  The Triton attention backend is used instead.
+
+3. *GPU allocation required at runtime*: SGLang queries GPU memory during
+   argument parsing, before loading any model.  Always run inside a GPU
+   allocation — without =--gpus-per-node= the server crashes immediately.
 
 Expect reduced throughput compared to MI300X.  Test before production use.
 
-** Known Bad Pattern (Do Not Use)
+** Step 1 — Build the image
 
-The following pattern appears in older install attempts and produces a silently
-broken install:
-
-#+BEGIN_SRC bash
-# WRONG — --no-deps skips petit_kernel, wave-lang, and other runtime deps
-python -m pip install --no-deps "$SRC_DIR/sglang/python"
-#+END_SRC
-
-The package imports but model inference fails.  Always install with the
-=all_hip= extra and without =--no-deps=.
-
-** Option A: Singularity .def (singularity build)
+Get an interactive CPU node (no GPU needed for the build):
 
 #+BEGIN_SRC bash
-export PROJECT=<project>
-export LAIF_BASE=/appl/local/laifs/containers/lumi-multitorch-latest.sif
-export SIF=/scratch/$PROJECT/$USER/lumi-sglang.sif
+srun --account=<project> --partition=small \
+     --ntasks=1 --cpus-per-task=8 --mem=120G \
+     --time=02:00:00 --nodes=1 --pty bash
 #+END_SRC
 
-Request a CPU build node (no GPU needed for the build):
-
-#+BEGIN_SRC bash
-srun --account=$PROJECT --partition=small --ntasks=1 --cpus-per-task=8 --mem=120G --time=02:00:00 --nodes=1 --pty bash
-#+END_SRC
+Set up the build environment:
 
 #+BEGIN_SRC bash
 module purge
@@ -79,39 +54,29 @@ export SINGULARITY_TMPDIR=/tmp/$USER
 export SINGULARITY_CACHEDIR=/tmp/$USER
 #+END_SRC
 
+Build the image:
+
 #+BEGIN_SRC bash
+export PROJECT=<project>
+export LAIF_BASE=/appl/local/laifs/containers/lumi-multitorch-latest.sif
+export SIF=/scratch/$PROJECT/$USER/lumi-sglang.sif
+
 singularity build --build-arg LAIF_BASE=$LAIF_BASE $SIF sglang-lumi.def
 #+END_SRC
 
-** Option B: pip-containerize (lumi-container-wrapper)
-
-Run from a GPU allocation on LUMI-G:
+** Step 2 — Get a GPU allocation
 
 #+BEGIN_SRC bash
-srun --account=<project> --partition=standard-g --gpus-per-node=1 --time=01:00:00 --pty bash -l
+srun --account=<project> --partition=standard-g \
+     --nodes=1 --ntasks=1 --cpus-per-task=7 \
+     --gpus-per-node=1 --mem=60G \
+     --time=01:00:00 --pty bash
 #+END_SRC
 
-#+BEGIN_SRC bash
-module purge
-module load LUMI
-module load cray-python
-module load lumi-container-wrapper
-#+END_SRC
+Adjust =--gpus-per-node= and =--cpus-per-task= for multi-GPU runs
+(7 CPU cores per GPU is the recommended ratio on LUMI-G).
 
-#+BEGIN_SRC bash
-bash scripts/install-sglang-pip-containerize.sh
-#+END_SRC
-
-The script respects =PROJECT=, =SGLANG_VERSION=, and =CONTAINER= env vars.
-
-** Run
-
-SGLang queries GPU memory during argument parsing, before loading any model.
-You must be inside a GPU allocation (=--gpus-per-node= in =srun= or =sbatch=)
-even for a quick test — without it the server crashes immediately with a memory
-capacity error.
-
-For Option A (Singularity image):
+** Step 3 — Set up the environment
 
 #+BEGIN_SRC bash
 module purge
@@ -123,23 +88,38 @@ export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_DIR/cache
 export MIOPEN_USER_DB=$MIOPEN_DIR/config
 #+END_SRC
 
+** Step 4 — Run the server
+
 #+BEGIN_SRC bash
+export SIF=/scratch/<project>/$USER/lumi-sglang.sif
+export MODEL=/scratch/<project>/$USER/models/Llama-3.1-8B-Instruct
+
 singularity exec \
   --env HF_TOKEN=$HF_TOKEN \
   $SIF \
   python -m sglang.launch_server \
-    --model-path meta-llama/Llama-3.1-8B-Instruct \
+    --model-path $MODEL \
     --host 0.0.0.0 \
     --port 30000 \
-    --tensor-parallel-size 8 \
-    --attention-backend triton \
-    --device cuda
+    --tp-size 1 \
+    --attention-backend triton
 #+END_SRC
+
+Set =--tp-size= to match the number of GPUs allocated.  Use a local model
+path under =/scratch= or a HuggingFace model id (requires =HF_TOKEN= for
+gated models).
 
 For a SLURM batch job see =scripts/sglang-serve.sh=.
 
-For Option B (pip-containerize), see the =SUCCESS= output printed by the
-install script for the exact launch command.
+** Known Bad Pattern (Do Not Use)
+
+#+BEGIN_SRC bash
+# WRONG — --no-deps skips petit_kernel, wave-lang, and other runtime deps
+python -m pip install --no-deps "$SRC_DIR/sglang/python"
+#+END_SRC
+
+The package imports but model inference fails.  Always install with the
+=all_hip= extra and without =--no-deps=.
 
 ** References
 
