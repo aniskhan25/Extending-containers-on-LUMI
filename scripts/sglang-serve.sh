@@ -34,12 +34,16 @@ module purge
 module use /appl/local/laifs/modules
 module load lumi-aif-singularity-bindings
 
+# MIOpen requires writable per-job cache dirs; it aborts if it cannot set
+# permissions on its runtime files.
+MIOPEN_DIR=$(mktemp -d)
+export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_DIR/cache
+export MIOPEN_USER_DB=$MIOPEN_DIR/config
+
 echo "Starting SGLang server on port $PORT with model $MODEL"
 echo "Node: $(hostname)"
-echo "GPUs available: $(rocm-smi --showid 2>/dev/null | grep -c 'GPU\[' || echo 'unknown')"
 
 singularity exec \
-    --rocm \
     --env HF_TOKEN="${HF_TOKEN:-}" \
     --env ROCR_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
     "$SIF" \
