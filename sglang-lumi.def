@@ -48,6 +48,46 @@ From: {{ LAIF_BASE }}
     # --no-build-isolation exposes the venv's ROCm PyTorch to any C extensions.
     pip install --no-cache-dir --no-build-isolation "./python[all_hip]"
 
+    # ── patch get_amdgpu_memory_capacity for MI250x ─────────────────────────
+    # SGLang queries GPU memory via `rocminfo | grep ... | awk ...` during
+    # argument parsing.  On MI250x/gfx90a the rocminfo output format does not
+    # match the grep pattern, producing an empty string.  The except clause only
+    # catches FileNotFoundError, so the ValueError from float('') propagates and
+    # crashes the server before it starts.
+    #
+    # The NVIDIA path already has the same torch.cuda.mem_get_info() fallback;
+    # this patch adds it to the AMD path and broadens the except to catch
+    # ValueError as well.
+    python - <<'PY'
+import re
+from pathlib import Path
+import sglang.srt.utils.common as m
+
+path = Path(m.__file__)
+src = path.read_text()
+
+old = '''    except FileNotFoundError:
+        raise RuntimeError(
+            "rocm-smi not found. Ensure AMD ROCm drivers are installed and accessible."
+        )'''
+
+new = '''    except (FileNotFoundError, ValueError):
+        # Fallback for MI250x/gfx90a: rocminfo output does not match the
+        # expected grep pattern, so the list comprehension produces float('')
+        # which raises ValueError.  Mirror the NVIDIA path's torch fallback.
+        if torch.cuda.is_available():
+            logger.warning(
+                "Failed to get GPU memory capacity from rocminfo, "
+                "falling back to torch.cuda.mem_get_info()."
+            )
+            return torch.cuda.mem_get_info()[1] // 1024 // 1024  # unit: MB
+        raise RuntimeError("Cannot determine AMD GPU memory capacity.")'''
+
+assert old in src, f"Patch target not found in {path} — check SGLang version"
+path.write_text(src.replace(old, new, 1))
+print(f"Patched {path}")
+PY
+
     rm -rf /tmp/sglang
 
 %environment

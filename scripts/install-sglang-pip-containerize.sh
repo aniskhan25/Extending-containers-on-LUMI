@@ -88,6 +88,37 @@ mv python/pyproject_other.toml python/pyproject.toml
 # time.  Skipping them produces an install that imports but fails on inference.
 python -m pip install --no-build-isolation "./python[all_hip]"
 
+# Patch get_amdgpu_memory_capacity for MI250x/gfx90a.
+# rocminfo output does not match SGLang's grep pattern on this architecture,
+# producing float('') -> ValueError.  The except only catches FileNotFoundError,
+# so the error crashes the server during argument parsing.  Add ValueError to
+# the except and mirror the NVIDIA path's torch.cuda.mem_get_info() fallback.
+python - <<'PY'
+from pathlib import Path
+import sglang.srt.utils.common as m
+
+path = Path(m.__file__)
+src = path.read_text()
+
+old = '''    except FileNotFoundError:
+        raise RuntimeError(
+            "rocm-smi not found. Ensure AMD ROCm drivers are installed and accessible."
+        )'''
+
+new = '''    except (FileNotFoundError, ValueError):
+        if torch.cuda.is_available():
+            logger.warning(
+                "Failed to get GPU memory capacity from rocminfo, "
+                "falling back to torch.cuda.mem_get_info()."
+            )
+            return torch.cuda.mem_get_info()[1] // 1024 // 1024  # unit: MB
+        raise RuntimeError("Cannot determine AMD GPU memory capacity.")'''
+
+assert old in src, f"Patch target not found in {path} — check SGLang version"
+path.write_text(src.replace(old, new, 1))
+print(f"Patched {path}")
+PY
+
 # pip check is intentionally omitted: SGLang and the container's vLLM have
 # conflicting dep versions (grpcio, openai, outlines-core, etc.). The
 # conflicts are in vLLM's side of the environment; SGLang itself installs
