@@ -107,42 +107,61 @@ Run it on a GPU allocation if you want to confirm GPU visibility. On CPU nodes,
 
 * SGLang on LUMI (Experimental)
 
-=sglang-lumi.def= extends the LAIF PyTorch base with
-[[https://github.com/sgl-project/sglang][SGLang]] built from source.
+Two files cover SGLang support:
+
+- =sglang-lumi.def= — Singularity image built with =singularity build=
+- =scripts/install-sglang-pip-containerize.sh= — alternative using LUMI's
+  =lumi-container-wrapper= (=pip-containerize=); closer to how vLLM is
+  installed on LUMI today
+
+Both use the same underlying technique described below.
 
 ** Status and Caveats
 
-SGLang does *not* officially support MI250x (=gfx90a=/CDNA2) as of mid-2025.
-The official ROCm targets are MI300X (=gfx942=) and MI350X (=gfx950=).
-Two workarounds are required:
+SGLang does *not* officially support MI250x (=gfx90a=/CDNA2).  The official
+ROCm targets are MI300X (=gfx942=) and MI350X (=gfx950=).  Two issues apply:
 
-1. *=aiter= build failure on gfx90a* ([[https://github.com/ROCm/aiter/issues/179][ROCm/aiter#179]]): the =aiter=
-   dependency compiles FP8 kernels by default, but MI250x has no native FP8
-   support.  Setting =CK_USE_FP8_ON_UNSUPPORTED_ARCH=ON= allows the build to
-   proceed via a compatibility path in =composable_kernel=.
+1. *=aiter= not compatible with gfx90a* ([[https://github.com/ROCm/aiter/issues/179][ROCm/aiter#179]]): the default
+   =pyproject.toml= pulls in =aiter=, whose =composable_kernel= build includes
+   FP8 kernels that gfx90a does not support, causing a build failure.
+   SGLang ships =pyproject_other.toml= as the AMD variant, which removes
+   =aiter= (and all other CUDA/NVIDIA-only deps) entirely.  Swapping this file
+   in before =pip install= is the correct fix.  The =SGLANG_USE_AITER=0=
+   runtime env var ensures aiter paths are disabled if they were somehow
+   present.
 
-2. *No FlashInfer support on MI250x*: FlashInfer's ROCm builds only cover
-   MI300X, MI325X, and MI355X.  The Triton attention backend
-   (=--attention-backend triton=) is used instead.
+2. *No FlashInfer on MI250x*: FlashInfer's ROCm builds cover MI300X/MI325X/
+   MI355X only.  =pyproject_other.toml= does not install FlashInfer.  The
+   Triton attention backend (=SGLANG_ATTENTION_BACKEND=triton=) is used
+   instead.
 
-Expect reduced throughput compared to MI300X.  FP8-quantised models may show
-accuracy differences.  Test before production use.
+Expect reduced throughput compared to MI300X.  Test before production use.
 
-** Build
+** Known Bad Pattern (Do Not Use)
+
+The following pattern appears in older install attempts and produces a silently
+broken install:
+
+#+BEGIN_SRC bash
+# WRONG — --no-deps skips petit_kernel, wave-lang, and other runtime deps
+python -m pip install --no-deps "$SRC_DIR/sglang/python"
+#+END_SRC
+
+The package imports but model inference fails.  Always install with the
+=all_hip= extra and without =--no-deps=.
+
+** Option A: Singularity .def (singularity build)
 
 #+BEGIN_SRC bash
 export PROJECT=<project>
-#+END_SRC
-
-#+BEGIN_SRC bash
 export LAIF_BASE=/appl/local/laifs/containers/lumi-multitorch-latest.sif
 export SIF=/scratch/$PROJECT/$USER/lumi-sglang.sif
 #+END_SRC
 
-Request a CPU build node with enough memory (the =aiter= compilation is heavy):
+Request a CPU build node (no GPU needed for the build):
 
 #+BEGIN_SRC bash
-srun --account=$PROJECT --partition=small --ntasks=1 --cpus-per-task=16 --mem=120G --time=04:00:00 --nodes=1 --pty bash
+srun --account=$PROJECT --partition=small --ntasks=1 --cpus-per-task=8 --mem=120G --time=02:00:00 --nodes=1 --pty bash
 #+END_SRC
 
 #+BEGIN_SRC bash
@@ -159,26 +178,29 @@ export SINGULARITY_CACHEDIR=/tmp/$USER
 singularity build --build-arg LAIF_BASE=$LAIF_BASE $SIF sglang-lumi.def
 #+END_SRC
 
-To pin a specific SGLang release (recommended for reproducibility):
+** Option B: pip-containerize (lumi-container-wrapper)
+
+Run from a GPU allocation on LUMI-G:
 
 #+BEGIN_SRC bash
-singularity build \
-  --build-arg LAIF_BASE=$LAIF_BASE \
-  --build-arg SGLANG_VERSION=v0.4.5 \
-  $SIF sglang-lumi.def
+srun --account=<project> --partition=standard-g --gpus-per-node=1 --time=01:00:00 --pty bash -l
 #+END_SRC
 
+#+BEGIN_SRC bash
+bash scripts/install-sglang-pip-containerize.sh
+#+END_SRC
+
+The script respects =PROJECT=, =SGLANG_VERSION=, and =CONTAINER= env vars.
+
 ** Run
+
+For Option A (Singularity image):
 
 #+BEGIN_SRC bash
 module purge
 module use /appl/local/laifs/modules
 module load lumi-aif-singularity-bindings
-#+END_SRC
 
-Launch an OpenAI-compatible server (8 GPUs, tensor-parallel):
-
-#+BEGIN_SRC bash
 singularity exec \
   --env HF_TOKEN=$HF_TOKEN \
   $SIF \
@@ -193,11 +215,8 @@ singularity exec \
 
 For a SLURM batch job see =scripts/sglang-serve.sh=.
 
-** Smoke Test
-
-#+BEGIN_SRC bash
-singularity exec $SIF python -c "import sglang; print(sglang.__version__)"
-#+END_SRC
+For Option B (pip-containerize), see the =SUCCESS= output printed by the
+install script for the exact launch command.
 
 ** SGLang References
 

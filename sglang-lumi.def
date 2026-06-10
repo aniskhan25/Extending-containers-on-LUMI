@@ -3,34 +3,26 @@ From: {{ LAIF_BASE }}
 
 %arguments
     LAIF_BASE=/appl/local/laifs/containers/lumi-multitorch-latest.sif
-    SGLANG_VERSION=v0.4.5
+    SGLANG_VERSION=v0.5.6.post2
 
 %labels
     Author Anis Rahman
     Description LAIF PyTorch container extended with SGLang (source build, MI250x/gfx90a)
 
-# NOTE: SGLang does not officially support MI250x (gfx90a/CDNA2) as of mid-2025.
-# Primary targets are MI300X (gfx942) and MI350X (gfx950).
-# This build applies two workarounds required for gfx90a:
-#   1. CK_USE_FP8_ON_UNSUPPORTED_ARCH=ON  — allows aiter/composable_kernel to
-#      compile FP8 kernels that gfx90a does not natively support. Without this
-#      the aiter build fails (ROCm/aiter#179).
-#   2. --attention-backend triton  — FlashInfer has no gfx90a support; Triton
-#      is the only viable attention backend on MI250x.
-# Expect reduced performance vs. MI300X and possible accuracy differences in
-# FP8-quantised models. Test thoroughly before production use.
+# MI250x (gfx90a/CDNA2) COMPATIBILITY NOTES
+# ------------------------------------------
+# SGLang's default pyproject.toml targets CUDA and includes NVIDIA/CUDA-only
+# deps (flashinfer, sgl-kernel, nvidia-cutlass-dsl, etc.) that cannot build on
+# ROCm.  The repo ships pyproject_other.toml as the AMD variant: it removes
+# those CUDA deps and replaces them with the HIP extras (petit_kernel,
+# wave-lang).  Critically, it also removes aiter, which fails to build for
+# gfx90a by default (ROCm/aiter#179).
+#
+# FlashInfer has no MI250x support; --attention-backend triton (set via
+# SGLANG_ATTENTION_BACKEND below) is the only viable runtime path on gfx90a.
 
 %post
     set -eux
-
-    # ── build-time environment ──────────────────────────────────────────────
-    export GPU_ARCHS=gfx90a
-    export PYTORCH_ROCM_ARCH=gfx90a
-    # Allow composable_kernel / aiter to compile FP8 kernels on gfx90a even
-    # though the architecture has no native FP8 hardware support.
-    export CK_USE_FP8_ON_UNSUPPORTED_ARCH=ON
-    export HIPBLASLT_TENSILE_LIBPATH=/opt/rocm/lib/hipblaslt/library
-    export MAX_JOBS=8
 
     python -m venv --system-site-packages /opt/sglang-venv
     . /opt/sglang-venv/bin/activate
@@ -43,15 +35,18 @@ From: {{ LAIF_BASE }}
 
     cd /tmp/sglang
 
-    # setup_rocm.py patches pyproject.toml for AMD and installs build deps
-    python setup_rocm.py
+    # Swap in the AMD pyproject before pip sees it.
+    # pyproject_other.toml removes all CUDA/NVIDIA deps and aiter, and defines
+    # the all_hip extra with only ROCm-compatible packages.
+    rm python/pyproject.toml
+    mv python/pyproject_other.toml python/pyproject.toml
 
-    # Build and install SGLang with the ROCm/HIP extras.
-    # --no-build-isolation keeps the ROCm PyTorch already in the venv visible
-    # to the build backend (required for torch-extension compilation).
-    pip install --no-cache-dir --no-build-isolation -e "python[all_hip]"
+    # Install SGLang with all AMD/HIP extras (petit_kernel, wave-lang, etc.).
+    # Do NOT pass --no-deps — the extras in pyproject_other[all_hip] are needed
+    # at runtime; skipping them produces a broken install that imports but fails.
+    # --no-build-isolation exposes the venv's ROCm PyTorch to any C extensions.
+    pip install --no-cache-dir --no-build-isolation "python[all_hip]"
 
-    # ── sanity check ────────────────────────────────────────────────────────
     python -m pip check
 
     rm -rf /tmp/sglang
@@ -61,12 +56,11 @@ From: {{ LAIF_BASE }}
     export VIRTUAL_ENV=/opt/sglang-venv
     export PYTHONNOUSERSITE=1
 
-    # MI250x has no native FP8 hardware; keep the flag set at runtime so any
-    # JIT-compiled kernels also use the compatibility path.
-    export CK_USE_FP8_ON_UNSUPPORTED_ARCH=ON
+    # Runtime: disable aiter (not installed; only meaningful on MI300X+).
+    export SGLANG_USE_AITER=0
 
-    # Triton is the only supported attention backend on gfx90a — FlashInfer
-    # does not list MI250x in its ROCm compatibility matrix.
+    # Runtime: Triton is the only supported attention backend on MI250x.
+    # FlashInfer is not installed and has no gfx90a support.
     export SGLANG_ATTENTION_BACKEND=triton
 
     export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
@@ -84,7 +78,7 @@ for name in ("sglang", "torch", "triton"):
         raise SystemExit(f"{name} not importable: {e}")
 
 if "+rocm" not in torch.__version__:
-    raise SystemExit("expected LAIF ROCm PyTorch to remain visible")
+    raise SystemExit("expected LAIF ROCm PyTorch to remain visible in venv")
 
 print(f"torch.cuda.is_available: {torch.cuda.is_available()}")
 print(f"GPU count: {torch.cuda.device_count()}")
