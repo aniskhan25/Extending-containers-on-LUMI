@@ -14,8 +14,12 @@ with additional Python packages.
 
 ** Status and Caveats
 
-SGLang does *not* officially support MI250x (=gfx90a=/CDNA2).  The official
-ROCm targets are MI300X (=gfx942=) and MI350X (=gfx950=).  Two issues apply:
+Confirmed working on MI250x (=gfx90a=/CDNA2) with SGLang v0.5.6.post2 and
+Llama-3.1-8B-Instruct.  SGLang does *not* officially support MI250x — the
+official ROCm targets are MI300X (=gfx942=) and MI350X (=gfx950=) — so the
+container applies several compatibility patches at build time.
+
+Known limitations on MI250x:
 
 1. *=aiter= not compatible with gfx90a* ([[https://github.com/ROCm/aiter/issues/179][ROCm/aiter#179]]): the default
    =pyproject.toml= pulls in =aiter=, whose =composable_kernel= build includes
@@ -24,13 +28,23 @@ ROCm targets are MI300X (=gfx942=) and MI350X (=gfx950=).  Two issues apply:
    =aiter= (and all other CUDA/NVIDIA-only deps) entirely.
 
 2. *No FlashInfer on MI250x*: FlashInfer's ROCm builds cover MI300X/MI325X/
-   MI355X only.  The Triton attention backend is used instead.
+   MI355X only.  The Triton attention backend is used instead
+   (=SGLANG_ATTENTION_BACKEND=triton=, set automatically by the container).
 
-3. *GPU allocation required at runtime*: SGLang queries GPU memory during
-   argument parsing, before loading any model.  Always run inside a GPU
-   allocation — without =--gpus-per-node= the server crashes immediately.
+3. *CUDA graphs disabled*: =--disable-cuda-graph= is required; CUDA graph
+   capture triggers kernel compatibility checks that fail on gfx90a.
 
-Expect reduced throughput compared to MI300X.  Test before production use.
+4. *Pure-PyTorch kernel fallback*: the container patches all =forward_hip=
+   methods that reference =sgl_kernel= or incompatible vLLM ops to use
+   =forward_native= (pure PyTorch).  This is correct but slower than the
+   compiled kernels available on MI300X.
+
+5. *GPU allocation required at runtime*: SGLang queries GPU memory during
+   argument parsing.  Always run inside a GPU allocation — without
+   =--gpus-per-node= the server crashes immediately.
+
+Expect reduced throughput compared to MI300X.  Suitable for development and
+testing; evaluate performance before production use.
 
 ** Step 1 — Build the image
 
