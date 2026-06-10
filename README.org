@@ -92,6 +92,13 @@ srun --account=<project> --partition=standard-g --gpus-per-node=1 --time=01:00:0
 #+END_SRC
 
 #+BEGIN_SRC bash
+module purge
+module load LUMI
+module load cray-python
+module load lumi-container-wrapper
+#+END_SRC
+
+#+BEGIN_SRC bash
 bash scripts/install-sglang-pip-containerize.sh
 #+END_SRC
 
