@@ -63,7 +63,32 @@ export SIF=/scratch/$PROJECT/$USER/lumi-sglang.sif
 singularity build --build-arg LAIF_BASE=$LAIF_BASE $SIF sglang-lumi.def
 #+END_SRC
 
-** Step 2 — Get a GPU allocation
+** Step 2 — Download a model
+
+Do this once from a login node or CPU allocation — no GPU needed.
+
+#+BEGIN_SRC bash
+module purge
+module use /appl/local/laifs/modules
+module load lumi-aif-singularity-bindings
+#+END_SRC
+
+#+BEGIN_SRC bash
+export SIF=/scratch/$PROJECT/$USER/lumi-sglang.sif
+export MODEL_DIR=/scratch/$PROJECT/$USER/models/Llama-3.1-8B-Instruct
+
+mkdir -p $MODEL_DIR
+
+singularity exec $SIF \
+  huggingface-cli download meta-llama/Llama-3.1-8B-Instruct \
+  --local-dir $MODEL_DIR \
+  --token $HF_TOKEN
+#+END_SRC
+
+=HF_TOKEN= must have access to the gated model.  Request access at
+[[https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct]] if needed.
+
+** Step 3 — Get a GPU allocation (dev-g)
 
 #+BEGIN_SRC bash
 srun --account=$PROJECT --partition=dev-g \
@@ -75,7 +100,7 @@ srun --account=$PROJECT --partition=dev-g \
 Adjust =--gpus-per-node= and =--cpus-per-task= for multi-GPU runs
 (7 CPU cores per GPU is the recommended ratio on LUMI-G).
 
-** Step 3 — Set up the environment
+** Step 4 — Set up the runtime environment
 
 #+BEGIN_SRC bash
 module purge
@@ -87,7 +112,7 @@ export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_DIR/cache
 export MIOPEN_USER_DB=$MIOPEN_DIR/config
 #+END_SRC
 
-** Step 4 — Run the server
+** Step 5 — Run the server
 
 #+BEGIN_SRC bash
 export SIF=/scratch/$PROJECT/$USER/lumi-sglang.sif
