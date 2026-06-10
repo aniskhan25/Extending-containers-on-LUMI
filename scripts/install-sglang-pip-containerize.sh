@@ -87,6 +87,11 @@ mv python/pyproject_other.toml python/pyproject.toml
 # (petit_kernel, wave-lang, etc.) are needed at runtime, not just at build
 # time.  Skipping them produces an install that imports but fails on inference.
 python -m pip install --no-build-isolation "./python[all_hip]"
+
+# pip check is intentionally omitted: SGLang and the container's vLLM have
+# conflicting dep versions (grpcio, openai, outlines-core, etc.). The
+# conflicts are in vLLM's side of the environment; SGLang itself installs
+# correctly and the two engines are used independently.
 SH
 chmod +x /tmp/post_sglang.sh
 

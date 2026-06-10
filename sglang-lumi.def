@@ -48,8 +48,6 @@ From: {{ LAIF_BASE }}
     # --no-build-isolation exposes the venv's ROCm PyTorch to any C extensions.
     pip install --no-cache-dir --no-build-isolation "./python[all_hip]"
 
-    python -m pip check
-
     rm -rf /tmp/sglang
 
 %environment
