@@ -150,6 +150,54 @@ gated models).
 
 For a SLURM batch job see =scripts/sglang-serve.sh=.
 
+** Step 6 — Test the server
+
+The server runs in the foreground, so open a *second terminal* on the same
+node.  From your laptop:
+
+#+BEGIN_SRC bash
+ssh lumi.csc.fi          # new terminal
+squeue --me              # find your node, e.g. nid005042
+ssh nid005042
+#+END_SRC
+
+Then test:
+
+#+BEGIN_SRC bash
+# Health check
+curl -s http://localhost:30000/health
+
+# OpenAI-compatible chat request
+curl -s http://localhost:30000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "default",
+    "messages": [{"role": "user", "content": "What is 2+2?"}],
+    "max_tokens": 50
+  }' | python3 -m json.tool
+#+END_SRC
+
+You should see a JSON response with the reply in =choices[0].message.content=.
+
+To run the server in the background instead (frees the terminal):
+
+#+BEGIN_SRC bash
+singularity exec \
+  ${HF_TOKEN:+--env HF_TOKEN=$HF_TOKEN} \
+  "$SIF" \
+  python -m sglang.launch_server \
+    --model-path "$MODEL" \
+    --host 0.0.0.0 \
+    --port 30000 \
+    --tp-size 1 \
+    --attention-backend triton \
+    --disable-cuda-graph \
+  > sglang.log 2>&1 &
+
+echo "Server PID: $!"
+tail -f sglang.log   # watch startup; Ctrl-C once you see "ready to roll"
+#+END_SRC
+
 ** References
 
 - [[https://docs.lumi-supercomputer.eu/software/containers/singularity/]]
