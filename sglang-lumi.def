@@ -45,7 +45,7 @@ From: {{ LAIF_BASE }}
     # Do NOT pass --no-deps — the extras in pyproject_other[all_hip] are needed
     # at runtime; skipping them produces a broken install that imports but fails.
     # --no-build-isolation exposes the venv's ROCm PyTorch to any C extensions.
-    pip install --no-cache-dir --no-build-isolation "python[all_hip]"
+    pip install --no-cache-dir --no-build-isolation "./python[all_hip]"
 
     python -m pip check
 

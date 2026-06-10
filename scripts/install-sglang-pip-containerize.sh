@@ -85,7 +85,7 @@ mv python/pyproject_other.toml python/pyproject.toml
 # Install with all AMD/HIP extras.  Do NOT use --no-deps: the extras
 # (petit_kernel, wave-lang, etc.) are needed at runtime, not just at build
 # time.  Skipping them produces an install that imports but fails on inference.
-python -m pip install --no-build-isolation "python[all_hip]"
+python -m pip install --no-build-isolation "./python[all_hip]"
 SH
 chmod +x /tmp/post_sglang.sh
 
