@@ -44,7 +44,7 @@ echo "Starting SGLang server on port $PORT with model $MODEL"
 echo "Node: $(hostname)"
 
 singularity exec \
-    --env HF_TOKEN="${HF_TOKEN:-}" \
+    ${HF_TOKEN:+--env HF_TOKEN=$HF_TOKEN} \
     --env ROCR_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
     "$SIF" \
     python -m sglang.launch_server \
