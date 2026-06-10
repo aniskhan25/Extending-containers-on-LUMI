@@ -153,81 +153,84 @@ aiter_dir.mkdir(exist_ok=True)
 print(f"Created aiter stub at {aiter_dir}")
 PY
 
-    # ── patch CustomOp.forward_hip base class ───────────────────────────────
-    # custom_op.py's default forward_hip delegates to forward_cuda, which calls
-    # sgl_kernel functions (e.g. silu_and_mul).  sgl_kernel is a stub — its
-    # attributes are stub module objects, not callables — so any custom op that
-    # doesn't override forward_hip (e.g. SiluAndMul, GeluAndMul, etc.) crashes
-    # at inference with "TypeError: 'module' object is not callable".
-    # Redirect the base forward_hip to forward_native (pure PyTorch) so all
-    # custom ops use the safe fallback path on ROCm/MI250x.
+    # ── auto-sweep: patch all forward_hip with incompatible ops ────────────
+    # Walk the entire SGLang source tree with AST and redirect every forward_hip
+    # that references ops incompatible with MI250x/gfx90a to forward_native
+    # (pure PyTorch).  This catches in one pass:
+    #   • sgl_kernel.*  — CUDA-only lib; stub attributes are non-callable modules
+    #   • aiter.*       — not built for gfx90a; stub attributes are non-callable
+    #   • fused_add_rms_norm(  — LAIF vLLM expects 4 args; SGLang passes 6
+    #   • return self.forward_cuda(  — base-class delegation that reaches sgl_kernel
+    # forward_native is slower (pure PyTorch) but correct on all hardware.
     python - <<'PY'
-import re
+import ast
 from pathlib import Path
-import sglang.srt.custom_op as m
+import sglang
 
-path = Path(m.__file__)
-src = path.read_text()
+sglang_root = Path(sglang.__file__).parent
 
-# Match the base-class forward_hip that unconditionally delegates to forward_cuda.
-# This is the only occurrence of "return self.forward_cuda" inside forward_hip.
-old = '        return self.forward_cuda(*args, **kwargs)'
-new = (
-    '        # sgl_kernel (CUDA-only) is a stub on ROCm/MI250x; '
-    'forward_cuda calls sgl_kernel\n'
-    '        # functions that are not callable. Fall back to the pure-PyTorch native path.\n'
-    '        return self.forward_native(*args, **kwargs)'
-)
+BAD_SYMBOLS = [
+    "sgl_kernel.",               # CUDA-only; stub returns non-callable objects
+    "aiter.",                    # not built for gfx90a; stub returns non-callable
+    "fused_add_rms_norm(",       # LAIF vLLM: expects 4 args, SGLang passes 6
+    "return self.forward_cuda(", # base-class fallback that reaches sgl_kernel
+]
 
-assert old in src, f"Patch target not found in {path} — check SGLang version"
-path.write_text(src.replace(old, new, 1))
-print(f"Patched CustomOp.forward_hip -> forward_native in {path}")
-PY
+def _build_call_args(func_node):
+    parts = [a.arg for a in func_node.args.args if a.arg != "self"]
+    if func_node.args.vararg:
+        parts.append(f"*{func_node.args.vararg.arg}")
+    if func_node.args.kwarg:
+        parts.append(f"**{func_node.args.kwarg.arg}")
+    return ", ".join(parts)
 
-    # ── patch forward_hip in layernorm.py ───────────────────────────────────
-    # forward_hip calls fused_add_rms_norm with 6 args but the LAIF container's
-    # vLLM version expects 4, causing TypeError at inference time.
-    # Redirect forward_hip to forward_native (pure PyTorch) which always works.
-    python - <<'PY'
-from pathlib import Path
-import sglang.srt.layers.layernorm as m
+patched = []
+for py_file in sorted(sglang_root.rglob("*.py")):
+    src = py_file.read_text()
+    if "def forward_hip" not in src:
+        continue
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        continue
 
-path = Path(m.__file__)
-src = path.read_text()
+    lines = src.splitlines()
+    replacements = []  # (body_start_idx, body_end_idx, indent, call_args)
 
-old = '''\
-    def forward_hip(
-        self,
-        x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        if not x.is_contiguous():
-            # NOTE: Remove this if aiter kernel supports discontinuous input
-            x = x.contiguous()
-        if residual is not None:
-            out = torch.empty_like(x)
-            residual_out = torch.empty_like(x)
-            fused_add_rms_norm(
-                out, x, residual_out, residual, self.weight.data, self.variance_epsilon
-            )
-            return out, residual_out
-        out = torch.empty_like(x)
-        rms_norm(out, x, self.weight.data, self.variance_epsilon)
-        return out'''
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for item in node.body:
+            if not (isinstance(item, ast.FunctionDef) and item.name == "forward_hip"):
+                continue
+            method_src = "\n".join(lines[item.lineno - 1 : item.end_lineno])
+            if not any(sym in method_src for sym in BAD_SYMBOLS):
+                continue
+            first_body_line = lines[item.body[0].lineno - 1]
+            ind = " " * (len(first_body_line) - len(first_body_line.lstrip()))
+            replacements.append((
+                item.body[0].lineno - 1,
+                item.end_lineno,
+                ind,
+                _build_call_args(item),
+            ))
 
-new = '''\
-    def forward_hip(
-        self,
-        x: torch.Tensor,
-        residual: Optional[torch.Tensor] = None,
-    ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        # fused_add_rms_norm in the LAIF container vLLM expects 4 args but
-        # SGLang calls it with 6. Delegate to forward_native (pure PyTorch).
-        return self.forward_native(x, residual)'''
+    if not replacements:
+        continue
 
-assert old in src, f"Patch target not found in {path} — check SGLang version"
-path.write_text(src.replace(old, new, 1))
-print(f"Patched forward_hip -> forward_native in {path}")
+    for start, end, ind, call_args in reversed(replacements):
+        lines[start:end] = [
+            f"{ind}# MI250x/gfx90a: sgl_kernel/aiter not available; vLLM op arity mismatch.",
+            f"{ind}# forward_native is the pure-PyTorch fallback — correct on all hardware.",
+            f"{ind}return self.forward_native({call_args})",
+        ]
+
+    py_file.write_text("\n".join(lines) + "\n")
+    patched.append(str(py_file.relative_to(sglang_root)))
+
+print(f"Auto-patched forward_hip in {len(patched)} file(s):")
+for f in patched:
+    print(f"  sglang/{f}")
 PY
 
     # ── patch get_amdgpu_memory_capacity for MI250x ─────────────────────────

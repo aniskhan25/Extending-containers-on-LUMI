@@ -80,7 +80,7 @@ export MODEL_DIR=/scratch/$PROJECT/$USER/models/Llama-3.1-8B-Instruct
 mkdir -p $MODEL_DIR
 
 singularity exec $SIF \
-  huggingface-cli download meta-llama/Llama-3.1-8B-Instruct \
+  hf download meta-llama/Llama-3.1-8B-Instruct \
   --local-dir $MODEL_DIR \
   --token $HF_TOKEN
 #+END_SRC
