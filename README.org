@@ -152,13 +152,13 @@ For a SLURM batch job see =scripts/sglang-serve.sh=.
 
 ** Step 6 — Test the server
 
-The server runs in the foreground, so open a *second terminal* on the same
-node.  From your laptop:
+The server runs in the foreground.  LUMI compute nodes do not accept direct
+SSH, so use =srun --overlap= to attach a second shell to the same job.
+From a *new terminal* logged into any LUMI login node:
 
 #+BEGIN_SRC bash
-ssh lumi.csc.fi          # new terminal
-squeue --me              # find your node, e.g. nid005042
-ssh nid005042
+squeue --me              # note your JOBID
+srun --overlap --pty --jobid=<JOBID> bash
 #+END_SRC
 
 Then test:
