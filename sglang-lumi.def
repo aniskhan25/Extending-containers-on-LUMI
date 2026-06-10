@@ -30,6 +30,7 @@ From: {{ LAIF_BASE }}
     python -m pip install --no-cache-dir --upgrade pip
 
     # ── clone SGLang at the pinned release ──────────────────────────────────
+    rm -rf /tmp/sglang
     git clone --depth 1 --branch {{ SGLANG_VERSION }} \
         https://github.com/sgl-project/sglang.git /tmp/sglang
 
