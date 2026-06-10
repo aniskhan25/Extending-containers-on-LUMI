@@ -39,6 +39,7 @@ echo "Node: $(hostname)"
 echo "GPUs available: $(rocm-smi --showid 2>/dev/null | grep -c 'GPU\[' || echo 'unknown')"
 
 singularity exec \
+    --rocm \
     --env HF_TOKEN="${HF_TOKEN:-}" \
     --env ROCR_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
     "$SIF" \

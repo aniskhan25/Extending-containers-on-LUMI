@@ -114,6 +114,7 @@ module use /appl/local/laifs/modules
 module load lumi-aif-singularity-bindings
 
 singularity exec \
+  --rocm \
   --env HF_TOKEN=$HF_TOKEN \
   $SIF \
   python -m sglang.launch_server \
