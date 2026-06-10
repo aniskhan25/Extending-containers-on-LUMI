@@ -102,6 +102,14 @@ stub_dir.mkdir(exist_ok=True)
     "# Stub for MI250x/gfx90a: sgl-kernel requires nvcc and cannot be built\n"
     "# on ROCm-only systems.  SGLang's ROCm code paths use Triton/petit_kernel\n"
     "# instead of these compiled kernels.\n"
+    "# __getattr__ handles 'from sgl_kernel import <name>' for any symbol.\n"
+    "def __getattr__(name):\n"
+    "    def _stub(*args, **kwargs):\n"
+    "        raise NotImplementedError(\n"
+    "            f'sgl_kernel.{name} is not available on MI250x/gfx90a '\n"
+    "            f'(sgl-kernel requires nvcc). Use the Triton backend instead.'\n"
+    "        )\n"
+    "    return _stub\n"
 )
 print(f"Created sgl_kernel stub at {stub_dir}")
 PY
