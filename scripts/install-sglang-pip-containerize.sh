@@ -33,6 +33,7 @@ rm -f /tmp/lumi_sglang.yaml /tmp/post_sglang.sh /tmp/empty_requirements.txt
 echo "[2/7] Load modules"
 module purge
 module load LUMI
+module load cray-python
 module load lumi-container-wrapper
 
 # ── 3. Prevent host env leakage into the container ──────────────────────────
