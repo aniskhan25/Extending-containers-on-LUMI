@@ -1,7 +1,18 @@
-#+TITLE: Extending LAIF for Matbench Discovery
+#+TITLE: Extending LAIF Containers on LUMI
 #+AUTHOR: Shanshan Wang, Anis Rahman
 #+OPTIONS: toc:nil
 #+OPTIONS: num:nil
+
+Examples of extending the LUMI AI Factory (LAIF) PyTorch Singularity container
+with additional Python packages.
+
+| Container definition        | Purpose                                      |
+|-----------------------------+----------------------------------------------|
+| =matbench-lumi.def=         | Matbench Discovery 1.3.1                     |
+| =matbench-mace-chgnet-lumi.def= | MACE and CHGNet (extends matbench image) |
+| =sglang-lumi.def=           | SGLang inference server (MI250x, experimental) |
+
+* Matbench Discovery
 
 This extends a LUMI AI Factory PyTorch container with
 =matbench-discovery==1.3.1=.
