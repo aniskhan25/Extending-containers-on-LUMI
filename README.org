@@ -1,24 +1,28 @@
-#+TITLE: Extending Containers on LUMI
-#+AUTHOR: Shanshan Wang
+#+TITLE: Extending Containers on LUMI — Anemoi
+#+AUTHOR: Anis Rahman
 #+OPTIONS: toc:nil
 #+OPTIONS: num:nil
 
-This guide shows how to extend the current LUMI AI Factory container with Poppler.
-The current LUMI AI Factory multi-framework container is available at =/appl/local/laifs/containers/lumi-multitorch-latest.sif=.
+This guide shows how to build the Anemoi container on LUMI and use it to run
+the training jobs in [[https://github.com/aniskhan25/anemoi-demo][anemoi-demo]].
+The container extends the LUMI AI Factory multi-framework container
+(=/appl/local/laifs/containers/lumi-multitorch-latest.sif=) and bakes in the
+full Anemoi training stack, so no per-run virtual environment setup is needed.
 
-Building containers requires memory, so run these commands on a LUMI login node and allocate resources before extending the container:
+* Build the container
+
+Container builds require significant memory. Allocate resources on a login node first:
 
 #+BEGIN_SRC bash
-export PROJECT=<project>
-#+END_SRC
-
-#+BEGIN_SRC bash
-export SIF=/scratch/$PROJECT/$USER/lumi-poppler.sif
+export PROJECT=<your-project>
+export SIF=/scratch/$PROJECT/$USER/anemoi-lumi.sif
 #+END_SRC
 
 #+BEGIN_SRC bash
 srun --account=$PROJECT --partition=small --ntasks=1 --cpus-per-task=8 --mem=120G --time=02:00:00 --nodes=1 --pty bash
 #+END_SRC
+
+Then load the required modules and build:
 
 #+BEGIN_SRC bash
 module purge
@@ -28,36 +32,51 @@ module load PRoot
 mkdir -p /tmp/$USER
 export SINGULARITY_TMPDIR=/tmp/$USER
 export SINGULARITY_CACHEDIR=/tmp/$USER
+
+singularity build $SIF anemoi-lumi.def
 #+END_SRC
 
-Create a definition file (e.g., =poppler-lumi.def=) where you define the packages to be installed:
+Verify the build:
 
 #+BEGIN_SRC bash
-Bootstrap: localimage
-From: /appl/local/laifs/containers/lumi-multitorch-latest.sif
-
-%post
-    apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y poppler-utils
-    apt-get clean
-    rm -rf /var/lib/apt/lists/*
+singularity test $SIF
 #+END_SRC
 
-Use Singularity to build the new container:
+* Run the Anemoi demos
+
+Clone the demo repository and configure the environment to point at the
+container built above. The venv is baked into the container at
+=/opt/anemoi-venv=, so set =ANEMOI_VENV= to that path instead of creating
+a new one.
 
 #+BEGIN_SRC bash
-singularity build $SIF poppler-lumi.def
+git clone https://github.com/aniskhan25/anemoi-demo
+cd anemoi-demo
 #+END_SRC
 
-From the allocated shell:
+Edit =env/lumi-env.sh= and set:
 
 #+BEGIN_SRC bash
-singularity exec $SIF pdftoppm -png sample.pdf sample
+CONTAINER="${CONTAINER:-$SIF}"
+ANEMOI_VENV="${ANEMOI_VENV:-/opt/anemoi-venv}"
 #+END_SRC
+
+Skip =scripts/install_venv.sh= — the container already contains all
+dependencies.
+
+Submit a minimal single-GPU validation job to confirm everything works:
+
+#+BEGIN_SRC bash
+sbatch jobs/validate_minimal.sh
+#+END_SRC
+
+Once that passes, proceed to the multi-GPU and multi-node jobs as described in
+the anemoi-demo README.
 
 * References
 - [[https://docs.lumi-supercomputer.eu/software/containers/singularity/]]
 - [[https://docs.lumi-supercomputer.eu/laif/software/ai-environment/]]
+- [[https://github.com/aniskhan25/anemoi-demo]]
 
 * Credits
 Original guide by Shanshan Wang. Updated by Anis Rahman.
