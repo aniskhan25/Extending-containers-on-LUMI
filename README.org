@@ -44,29 +44,20 @@ singularity test $SIF
 
 * Run the Anemoi demos
 
-Clone the demo repository and configure the environment to point at the
-container built above. The venv is baked into the container at
-=/opt/anemoi-venv=, so set =ANEMOI_VENV= to that path instead of creating
-a new one.
+The demo repository lives at =/scratch/$PROJECT/$USER/anemoi-demo/=.
+The venv is baked into the container at =/opt/anemoi-venv=, so
+=scripts/install_venv.sh= is not needed.
+
+=env/lumi-env.sh= uses =${VAR:-default}= for all paths, so override
+=CONTAINER= and =ANEMOI_VENV= by exporting them before =sbatch= — the job
+inherits the calling environment and =lumi-env.sh= picks up the pre-set values.
 
 #+BEGIN_SRC bash
-git clone https://github.com/aniskhan25/anemoi-demo
-cd anemoi-demo
-#+END_SRC
+cd /scratch/$PROJECT/$USER/anemoi-demo
 
-Edit =env/lumi-env.sh= and set:
+export CONTAINER=/scratch/$PROJECT/$USER/anemoi-lumi.sif
+export ANEMOI_VENV=/opt/anemoi-venv
 
-#+BEGIN_SRC bash
-CONTAINER="${CONTAINER:-$SIF}"
-ANEMOI_VENV="${ANEMOI_VENV:-/opt/anemoi-venv}"
-#+END_SRC
-
-Skip =scripts/install_venv.sh= — the container already contains all
-dependencies.
-
-Submit a minimal single-GPU validation job to confirm everything works:
-
-#+BEGIN_SRC bash
 sbatch jobs/validate_minimal.sh
 #+END_SRC
 
