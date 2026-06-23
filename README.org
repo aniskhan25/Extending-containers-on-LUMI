@@ -48,8 +48,13 @@ singularity test $SIF
 
 * Run JAX workloads
 
-Load the Singularity bindings module before running jobs so JAX can access
-the MI250x GPUs:
+Allocate a GPU node interactively:
+
+#+BEGIN_SRC bash
+srun --account=$PROJECT --partition=dev-g --ntasks=1 --cpus-per-task=8 --gpus=1 --mem=60G --time=01:00:00 --nodes=1 --pty bash
+#+END_SRC
+
+Load the Singularity bindings module so JAX can access the MI250x GPUs:
 
 #+BEGIN_SRC bash
 module use /appl/local/laifs/modules
