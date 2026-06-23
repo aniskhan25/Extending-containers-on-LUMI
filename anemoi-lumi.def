@@ -1,0 +1,45 @@
+Bootstrap: localimage
+From: {{ LAIF_BASE }}
+
+%arguments
+    LAIF_BASE=/appl/local/laifs/containers/lumi-multitorch-latest.sif
+
+%labels
+    Author Anis Rahman
+    Description LAIF PyTorch container extended for Anemoi training on LUMI
+
+%files
+    scripts/anemoi-smoke.py /opt/anemoi-smoke.py
+
+%post
+    set -eux
+
+    python -m venv --system-site-packages /opt/anemoi-venv
+    . /opt/anemoi-venv/bin/activate
+
+    python -m pip install --no-cache-dir --upgrade \
+        pip \
+        setuptools \
+        wheel
+
+    python -m pip install --no-cache-dir \
+        'anemoi-training==0.7.0' \
+        'anemoi-models==0.10.0' \
+        'anemoi-graphs==0.7.2' \
+        'zarr<3' \
+        'trimesh' \
+        'pyshtools'
+
+    python -m pip check
+
+%environment
+    export PATH=/opt/anemoi-venv/bin:$PATH
+    export VIRTUAL_ENV=/opt/anemoi-venv
+    export PYTHONNOUSERSITE=1
+    export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
+
+%runscript
+    exec python "$@"
+
+%test
+    python /opt/anemoi-smoke.py
