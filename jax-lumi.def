@@ -21,6 +21,8 @@ From: {{ LAIF_BASE }}
 %post
     set -eux
 
+    chmod a+rx /opt/jax-smoke.py
+
     python3 -m venv --system-site-packages /opt/jax-venv
     . /opt/jax-venv/bin/activate
 
