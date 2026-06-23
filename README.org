@@ -61,24 +61,16 @@ module use /appl/local/laifs/modules
 module load lumi-aif-singularity-bindings
 #+END_SRC
 
+Verify JAX can see the GPUs:
+
+#+BEGIN_SRC bash
+singularity exec $SIF python3 -c "import jax; print(jax.devices())"
+#+END_SRC
+
 Run a script:
 
 #+BEGIN_SRC bash
-singularity exec $SIF python my_script.py
-#+END_SRC
-
-Or start an interactive Python session:
-
-#+BEGIN_SRC bash
-singularity exec $SIF python
-#+END_SRC
-
-Inside the container, JAX picks up the ROCm backend automatically. Verify
-with:
-
-#+BEGIN_SRC python
-import jax
-print(jax.devices())   # shows rocm:0, rocm:1, ...
+singularity exec $SIF python3 /path/to/your_script.py
 #+END_SRC
 
 * References
