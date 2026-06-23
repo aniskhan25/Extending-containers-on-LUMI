@@ -30,8 +30,6 @@ From: {{ LAIF_BASE }}
         'trimesh' \
         'pyshtools'
 
-    python -m pip check
-
 %environment
     export PATH=/opt/anemoi-venv/bin:$PATH
     export VIRTUAL_ENV=/opt/anemoi-venv
