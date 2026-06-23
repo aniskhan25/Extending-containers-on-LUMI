@@ -7,7 +7,7 @@ This guide shows how to build the JAX container on LUMI and use it to run
 JAX workloads on MI250x GPUs.
 
 The container extends the LUMI AI Factory MPICH layer
-(=/appl/local/laifs/containers/lumi-multitorch-mpich-latest.sif=), which
+(=/appl/local/laifs/containers/lumi-multitorch-u24r70f21m50t210-20260513_121430/lumi-multitorch-mpich-u24r70f21m50t210-20260513_121430.sif=), which
 provides ROCm, libfabric, and MPICH pre-configured for MI250x — without the
 PyTorch overhead of the full container.
 JAX is installed with its pre-built ROCm wheels and the common ecosystem

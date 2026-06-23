@@ -2,7 +2,7 @@ Bootstrap: localimage
 From: {{ LAIF_BASE }}
 
 %arguments
-    LAIF_BASE=/appl/local/laifs/containers/lumi-multitorch-mpich-latest.sif
+    LAIF_BASE=/appl/local/laifs/containers/lumi-multitorch-u24r70f21m50t210-20260513_121430/lumi-multitorch-mpich-u24r70f21m50t210-20260513_121430.sif
 
 %labels
     Author Anis Rahman
