@@ -21,19 +21,19 @@ From: {{ LAIF_BASE }}
 %post
     set -eux
 
-    python -m venv --system-site-packages /opt/jax-venv
+    python3 -m venv --system-site-packages /opt/jax-venv
     . /opt/jax-venv/bin/activate
 
-    python -m pip install --no-cache-dir --upgrade \
+    python3 -m pip install --no-cache-dir --upgrade \
         pip \
         setuptools \
         wheel
 
-    python -m pip install --no-cache-dir \
+    python3 -m pip install --no-cache-dir \
         "jax[rocm]" \
         -f https://storage.googleapis.com/jax-releases/jax_rocm.html
 
-    python -m pip install --no-cache-dir \
+    python3 -m pip install --no-cache-dir \
         optax \
         flax
 
@@ -44,7 +44,7 @@ From: {{ LAIF_BASE }}
     export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
 
 %runscript
-    exec python "$@"
+    exec python3 "$@"
 
 %test
-    python /opt/jax-smoke.py
+    python3 /opt/jax-smoke.py

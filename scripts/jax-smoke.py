@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Smoke test for the LUMI JAX container."""
 
 from __future__ import annotations
