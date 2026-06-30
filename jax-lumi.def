@@ -31,9 +31,9 @@ From: {{ LAIF_BASE }}
         setuptools \
         wheel
 
-    # Core JAX — must match the JAX 0.4.x era AMD plugin packages below
+    # Core JAX — version is resolved by the AMD plugin requirements below
     python3 -m pip install --no-cache-dir \
-        "jax==0.4.38" \
+        "jax" \
         optax \
         flax
 
