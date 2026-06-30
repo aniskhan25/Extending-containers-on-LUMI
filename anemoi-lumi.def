@@ -24,10 +24,17 @@ From: {{ LAIF_BASE }}
         setuptools \
         wheel
 
-    # Freeze the base ROCm torch stack so pip cannot swap in PyPI (CPU/CUDA) wheels
-    python -m pip freeze 2>/dev/null \
-        | grep -iE '^(torch|torchvision|torchaudio|pytorch-triton|triton)([=<>!~ ]|$)' \
-        > /opt/rocm-constraints.txt || true
+    # Pin the base ROCm torch stack so pip cannot swap in PyPI (CPU/CUDA) wheels.
+    # Emit plain name==version lines (not pip freeze's "@ file://" form, which
+    # makes pip try to reinstall from a wheel path that no longer exists).
+    python - > /opt/rocm-constraints.txt <<'PY'
+from importlib.metadata import PackageNotFoundError, version
+for pkg in ("torch", "torchvision", "torchaudio", "pytorch-triton", "triton"):
+    try:
+        print(f"{pkg}=={version(pkg)}")
+    except PackageNotFoundError:
+        pass
+PY
 
     python -m pip install --no-cache-dir -c /opt/rocm-constraints.txt \
         'anemoi-training==0.14.0' \
