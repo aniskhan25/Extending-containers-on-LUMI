@@ -48,6 +48,7 @@ From: {{ LAIF_BASE }}
     export VIRTUAL_ENV=/opt/jax-venv
     export PYTHONNOUSERSITE=1
     export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
+    export LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH:-}
 
 %runscript
     exec python3 "$@"
