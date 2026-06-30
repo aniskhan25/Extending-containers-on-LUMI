@@ -12,8 +12,8 @@ From: {{ LAIF_BASE }}
 # ----------------------------
 # The mpich base provides ROCm 7.x, libfabric, and MPICH.
 # JAX dropped official ROCm wheels (jax_rocm.html is gone); GPU support is
-# now provided by AMD's plugin packages from repo.radeon.com, pinned to the
-# ROCm version in the base container.
+# now provided by AMD's plugin packages from repo.radeon.com. The plugins are
+# built against JAX 0.4.x — jax==0.4.38 is the required core version.
 
 %files
     scripts/jax-smoke.py /opt/jax-smoke.py
@@ -31,9 +31,9 @@ From: {{ LAIF_BASE }}
         setuptools \
         wheel
 
-    # Core JAX — version must match the AMD plugin packages below
+    # Core JAX — must match the JAX 0.4.x era AMD plugin packages below
     python3 -m pip install --no-cache-dir \
-        "jax==0.6.0" \
+        "jax==0.4.38" \
         optax \
         flax
 
