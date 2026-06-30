@@ -12,8 +12,9 @@ From: {{ LAIF_BASE }}
 # ----------------------------
 # The mpich base provides ROCm 7.x, libfabric, and MPICH.
 # JAX dropped official ROCm wheels (jax_rocm.html is gone); GPU support is
-# now provided by AMD's plugin packages from repo.radeon.com. The plugins are
-# built against JAX 0.4.x — jax==0.4.38 is the required core version.
+# now provided by AMD's plugin packages from repo.radeon.com.
+# jax_rocm7_plugin requires libdw1 (elfutils) and a librocm_smi64.so.1
+# compat symlink — ROCm 7 ships that library as .so.7.
 
 %files
     scripts/jax-smoke.py /opt/jax-smoke.py
@@ -22,6 +23,9 @@ From: {{ LAIF_BASE }}
     set -eux
 
     chmod a+rx /opt/jax-smoke.py
+
+    # libdw1 (elfutils) is needed by jax_rocm7_plugin but absent from the base
+    apt-get install -y --no-install-recommends libdw1
 
     python3 -m venv --system-site-packages /opt/jax-venv
     . /opt/jax-venv/bin/activate
