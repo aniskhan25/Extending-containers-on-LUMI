@@ -43,12 +43,16 @@ From: {{ LAIF_BASE }}
         jax_rocm7_plugin \
         jax_rocm7_pjrt
 
+    # jax_rocm7_plugin links against librocm_smi64.so.1 (ROCm 6 soname),
+    # but ROCm 7 ships librocm_smi64.so.7. Create a compat symlink.
+    ln -sf /opt/rocm-7.0.2/lib/librocm_smi64.so.7 /opt/rocm-7.0.2/lib/librocm_smi64.so.1
+
 %environment
     export PATH=/opt/jax-venv/bin:$PATH
     export VIRTUAL_ENV=/opt/jax-venv
     export PYTHONNOUSERSITE=1
     export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
-    export LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH:-}
+    export LD_LIBRARY_PATH=/opt/rocm-7.0.2/lib:${LD_LIBRARY_PATH:-}
 
 %runscript
     exec python3 "$@"
