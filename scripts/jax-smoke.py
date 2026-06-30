@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
-"""Smoke test for the LUMI JAX container."""
+"""Smoke test for the LUMI JAX container.
+
+Run during build (%test): validates imports only — no GPU required.
+Run post-build on a GPU node to validate the ROCm backend:
+    singularity exec --rocm container.sif python3 /opt/jax-smoke.py --gpu
+"""
 
 from __future__ import annotations
 
+import argparse
 import importlib
 
 import jax
@@ -19,6 +25,10 @@ def check_import(name: str) -> str:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--gpu", action="store_true", help="Assert GPU backend (run on compute node)")
+    args = parser.parse_args()
+
     packages = ["jax", "jaxlib", "optax", "flax"]
 
     failed = 0
@@ -29,22 +39,22 @@ def main() -> None:
             failed += 1
 
     backend = jax.default_backend()
-    print(f"jax.default_backend: {backend}")
-    if backend != "gpu":
-        print(f"FAIL  expected gpu backend, got {backend}")
-        failed += 1
-
     devices = jax.devices()
+    print(f"jax.default_backend: {backend}")
     print(f"jax.devices: {devices}")
 
-    if not devices:
-        print("FAIL  no JAX devices found")
-        failed += 1
-    else:
-        # Run a minimal compute operation to confirm the backend works
-        a = jnp.ones((4, 4))
-        b = jnp.dot(a, a)
-        print(f"jnp.dot result shape: {b.shape}, sum: {float(b.sum()):.1f}")
+    if args.gpu:
+        if backend != "gpu":
+            print(f"FAIL  expected gpu backend, got {backend}")
+            failed += 1
+        elif not devices:
+            print("FAIL  no JAX devices found")
+            failed += 1
+
+    # Basic compute — runs on whatever backend is available
+    a = jnp.ones((4, 4))
+    b = jnp.dot(a, a)
+    print(f"jnp.dot result shape: {b.shape}, sum: {float(b.sum()):.1f}")
 
     if failed:
         raise SystemExit(f"{failed} check(s) failed")
