@@ -28,6 +28,11 @@ def main() -> None:
     ]
 
     print(f"torch: {torch.__version__}")
+    print(f"torch.version.hip: {torch.version.hip}")
+    assert torch.version.hip is not None, (
+        f"torch is not a ROCm build (hip={torch.version.hip}); "
+        "a CPU/CUDA wheel was likely pulled in during install"
+    )
     print(f"torch.cuda.is_available: {torch.cuda.is_available()}")
     if torch.cuda.is_available():
         print(f"torch.cuda.device_count: {torch.cuda.device_count()}")
