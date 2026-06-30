@@ -19,10 +19,7 @@ From: {{ LAIF_BASE }}
     python -m venv --system-site-packages /opt/anemoi-venv
     . /opt/anemoi-venv/bin/activate
 
-    python -m pip install --no-cache-dir --upgrade \
-        pip \
-        setuptools \
-        wheel
+    python -m pip install --no-cache-dir --upgrade pip
 
     # Pin the base ROCm torch stack so pip cannot swap in PyPI (CPU/CUDA) wheels.
     # Emit plain name==version lines (not pip freeze's "@ file://" form, which
