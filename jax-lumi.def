@@ -10,10 +10,10 @@ From: {{ LAIF_BASE }}
 
 # MI250x (gfx90a/CDNA2) NOTES
 # ----------------------------
-# JAX provides pre-built ROCm wheels at storage.googleapis.com/jax-releases.
-# The mpich base is used instead of the full torch container because JAX does
-# not depend on PyTorch and the mpich layer already provides ROCm, libfabric,
-# and MPICH — everything needed for single- and multi-GPU JAX workloads.
+# The mpich base provides ROCm 7.x, libfabric, and MPICH.
+# JAX dropped official ROCm wheels (jax_rocm.html is gone); GPU support is
+# now provided by AMD's plugin packages from repo.radeon.com, pinned to the
+# ROCm version in the base container.
 
 %files
     scripts/jax-smoke.py /opt/jax-smoke.py
@@ -23,7 +23,7 @@ From: {{ LAIF_BASE }}
 
     chmod a+rx /opt/jax-smoke.py
 
-    python3 -m venv --system-site-packages /opt/jax-venv
+    python3 -m venv /opt/jax-venv
     . /opt/jax-venv/bin/activate
 
     python3 -m pip install --no-cache-dir --upgrade \
@@ -31,13 +31,17 @@ From: {{ LAIF_BASE }}
         setuptools \
         wheel
 
+    # Core JAX — version must match the AMD plugin packages below
     python3 -m pip install --no-cache-dir \
-        "jax[rocm]" \
-        -f https://storage.googleapis.com/jax-releases/jax_rocm.html
-
-    python3 -m pip install --no-cache-dir \
+        "jax==0.6.0" \
         optax \
         flax
+
+    # ROCm 7 GPU backend — AMD-maintained plugins for ROCm 7.0.2
+    python3 -m pip install --no-cache-dir \
+        --find-links https://repo.radeon.com/rocm/manylinux/rocm-rel-7.0.2/ \
+        jax_rocm7_plugin \
+        jax_rocm7_pjrt
 
 %environment
     export PATH=/opt/jax-venv/bin:$PATH

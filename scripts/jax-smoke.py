@@ -28,6 +28,12 @@ def main() -> None:
         if result.startswith("FAIL"):
             failed += 1
 
+    backend = jax.default_backend()
+    print(f"jax.default_backend: {backend}")
+    if backend != "gpu":
+        print(f"FAIL  expected gpu backend, got {backend}")
+        failed += 1
+
     devices = jax.devices()
     print(f"jax.devices: {devices}")
 
