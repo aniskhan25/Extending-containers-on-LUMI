@@ -189,25 +189,26 @@ singularity exec $SIF env NVTE_FLASH_ATTN=0 \
 Measured on one MI250x GCD, =batch=2 heads=16 head_dim=64=, bf16, forward plus
 backward:
 
-| seq_len | peak MiB | ms/iter | backend        |
-|---------+----------+---------+----------------|
-|    1024 |       40 |    0.71 | FlashAttention |
-|    2048 |       81 |    2.03 | FlashAttention |
-|    4096 |      161 |    7.46 | FlashAttention |
-|    8192 |      322 |   27.57 | FlashAttention |
-|   16384 |      644 |  108.52 | FlashAttention |
-|   32768 |     1288 |  426.24 | FlashAttention |
+| seq_len | FlashAttention MiB | Unfused MiB | FlashAttention ms | Unfused ms |
+|---------+--------------------+-------------+-------------------+------------|
+|    1024 |                 40 |         313 |              0.71 |       1.50 |
+|    2048 |                 81 |         732 |              2.03 |       4.78 |
+|    4096 |                161 |        2344 |              7.46 |      25.38 |
+|    8192 |                322 |        8664 |             27.57 |     129.71 |
+|   16384 |                644 | OOM         |            108.52 | —          |
+|   32768 |               1288 | OOM         |            426.24 | —          |
 
-Peak memory doubles with =seq_len= — linear, the signature of flash attention —
-and is fully accounted for by q/k/v, their gradients and the output. Step time
-grows about 3.9x per doubling, i.e. O(seq^2) FLOPs, which is what attention costs
-when the kernel is genuinely doing the work.
+Peak memory with FlashAttention doubles with =seq_len= — linear, the signature of
+the fused kernel — and is fully accounted for by q/k/v, their gradients and the
+output. Unfused grows 2.3x, 3.2x, 3.7x per doubling, converging on 4x, because it
+materializes a =batch*heads*seq*seq= score matrix: =2*16*seq^2*2= bytes, or 1 GiB
+at =seq_len=4096= and 16 GiB at =16384=, plus the softmax and gradient buffers it
+holds alongside. That exhausts the 64 GB GCD by =seq_len=16384=.
 
-The unfused path materializes a =batch*heads*seq*seq= score matrix, which is
-=2*16*seq^2*2= bytes on its own: 1 GiB at =seq_len=4096=, 16 GiB at =16384=,
-64 GiB at =32768= — before counting the softmax and gradient buffers it also
-holds. On a 64 GB GCD it OOMs partway up the sweep, which is the failure this
-container fixes.
+The fix is not only about memory. At =seq_len=8192= the fused path uses 27x less
+memory /and/ runs 4.7x faster, and the speedup widens with sequence length.
+Step time still grows ~3.9x per doubling in both cases, since attention is O(seq^2)
+in FLOPs either way — flash attention removes the memory traffic, not the work.
 
 * Run workloads
 
