@@ -1,19 +1,122 @@
-#+TITLE: Extending Containers on LUMI
-#+AUTHOR: Shanshan Wang
+#+TITLE: Extending Containers on LUMI — TransformerEngine
+#+AUTHOR: Anis Rahman
 #+OPTIONS: toc:nil
 #+OPTIONS: num:nil
 
-This guide shows how to extend the current LUMI AI Factory container with Poppler.
-The current LUMI AI Factory multi-framework container is available at =/appl/local/laifs/containers/lumi-multitorch-latest.sif=.
+This guide builds a container that restores fused attention in the LUMI AI Factory
+=plus= image on MI250x, and shows how to confirm the problem it fixes.
 
-Building containers requires memory, so run these commands on a LUMI login node and allocate resources before extending the container:
+* Why this container exists
+
+The =plus= image is a technology preview: the =full= image plus an experimental
+TransformerEngine. Out of the box it runs attention through
+=UnfusedDotProductAttention= on MI250x — the vanilla implementation, which
+materializes the full =batch x heads x seq x seq= score matrix and OOMs at real
+sequence lengths. Two independent causes stack up:
+
+1. LAIF builds the image's TransformerEngine (=ROCm/TransformerEngine= tag
+   =v2.8_rocm=, =gfx90a=) with =NVTE_FUSED_ATTN=0=, so no fused-attention backend
+   is compiled in — neither Composable Kernel nor AOTriton. flash-attn is the
+   only optimized attention path the image can reach.
+2. The base builds =ROCm/flash-attention= at commit =bbe25ba=, which reports
+   version =2.8.4=, but TE =v2.8_rocm= hardcodes =max_version = PkgVersion("2.8.3")=
+   in =FlashAttentionUtils=. The bound is enforced at *import* time in the sibling
+   =backends.py=, so =is_installed= stays =False= and =flash_attn_func= /
+   =flash_attn_varlen_func= / =_flash_attn_fwd= / =_flash_attn_bwd= are left as
+   =None= — the FlashAttention backend cannot run whatever =NVTE_FLASH_ATTN= says.
+
+TE's backend priority is FusedAttention → FlashAttention →
+UnfusedDotProductAttention, so with the first two removed every attention call
+lands on the third. TE does log =Supported flash-attn versions are ... Found
+flash-attn 2.8.4.= at warning level, but the resulting backend choice is only
+visible at =NVTE_DEBUG_LEVEL=2=, so in practice this surfaces as an OOM rather
+than as an error.
+
+=2.8.4= is a ROCm-fork-only version number — upstream flash-attn 2 stops at
+=2.8.3= — so TE's cap records "newest upstream tested" rather than a known
+=2.8.4= defect. Relaxing it unlocks a real kernel rather than a fallback: LAIF
+compiles flash-attention with =BUILD_TARGET=rocm GPU_ARCHS=gfx90a= and does /not/
+set =FLASH_ATTENTION_TRITON_AMD_ENABLE=, so the =flash_attn_2_cuda=
+composable-kernel extension is built for gfx90a and simply sits unused. This
+container therefore raises the cap instead of downgrading flash-attn — no compile
+time, and the arch-tuned kernel is kept. Do /not/ set
+=FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE= in this image; it would switch
+flash-attn to a Triton backend the image never built. See
+[[#fallback][Fallback]] if the fix does not validate.
+
+* Confirm the diagnosis
+
+Worth doing once, on a GPU node, before building — this output is the evidence the
+fix is needed. The smoke test is bind-mounted, since the stock image does not carry
+it.
 
 #+BEGIN_SRC bash
-export PROJECT=<project>
+export PROJECT=<your-project>
+srun --account=$PROJECT --partition=dev-g --ntasks=1 --cpus-per-task=8 --gpus=1 --mem=60G --time=01:00:00 --nodes=1 --pty bash
+module use /appl/local/laifs/modules
+module load lumi-aif-singularity-bindings
+
+export PLUS=/appl/local/laifs/containers/lumi-multitorch-u24r70f21m50t210-20260513_121430/lumi-multitorch-plus-u24r70f21m50t210-20260513_121430.sif
 #+END_SRC
 
+Versions, and where the packages live — the latter decides how a layer on top of
+this image must install anything. Note TE version-gates on the *distribution
+metadata* (=get_pkg_version("flash-attn")=), not =flash_attn.__version__=, and
+LAIF retags the wheel with =wretag -q lumi_aif_<arch>_<commit>=, so the two can
+differ:
+
 #+BEGIN_SRC bash
-export SIF=/scratch/$PROJECT/$USER/lumi-poppler.sif
+singularity exec $PLUS python3 -c '
+import sys, torch, flash_attn, transformer_engine as te
+from importlib.metadata import version
+print("prefix", sys.prefix, "base_prefix", sys.base_prefix)
+print("torch", torch.__version__, "hip", torch.version.hip)
+print("flash_attn", flash_attn.__version__, "metadata", version("flash-attn"))
+print("te", te.__version__, te.__file__)'
+#+END_SRC
+
+TE's own view of the bound, and whether it bound the flash-attn entry points at
+all — =None= there means the FlashAttention backend is unusable regardless of any
+environment variable:
+
+#+BEGIN_SRC bash
+singularity exec $PLUS python3 -c '
+from transformer_engine.pytorch.attention.dot_product_attention import backends, utils
+fa = utils.FlashAttentionUtils
+print(utils.__file__)
+print({k: str(v) for k, v in vars(fa).items() if not k.startswith("__")})
+print("flash_attn_func", backends.flash_attn_func)
+print("_flash_attn_fwd", backends._flash_attn_fwd)'
+#+END_SRC
+
+Expected broken state: =is_installed False=, =version 2.8.4=, =max_version 2.8.3=,
+and both function objects =None=. =scripts/transformer-engine-smoke.py= also
+locates the bounds holder by shape, so a rename in a future base cannot turn it
+into a false pass.
+
+The unpatched sweep, which is the "before" column of the benchmark. The version
+checks fail here by design; the sweep still runs:
+
+#+BEGIN_SRC bash
+singularity exec -B $PWD/scripts:/scripts $PLUS \
+    env NVTE_DEBUG=1 NVTE_DEBUG_LEVEL=2 \
+    python3 /scripts/transformer-engine-smoke.py --bench
+#+END_SRC
+
+Confirm fused attention really is absent from the build, rather than merely
+rejected for this configuration:
+
+#+BEGIN_SRC bash
+singularity exec $PLUS python3 -c \
+    'import transformer_engine_torch as tex; print([n for n in dir(tex) if "fused_attn" in n.lower()])'
+#+END_SRC
+
+* Build the container
+
+Container builds require memory. Allocate resources first:
+
+#+BEGIN_SRC bash
+export SIF=/scratch/$PROJECT/$USER/transformer-engine-lumi.sif
 #+END_SRC
 
 #+BEGIN_SRC bash
@@ -28,36 +131,112 @@ module load PRoot
 mkdir -p /tmp/$USER
 export SINGULARITY_TMPDIR=/tmp/$USER
 export SINGULARITY_CACHEDIR=/tmp/$USER
+
+singularity build $SIF transformer-engine-lumi.def
 #+END_SRC
 
-Create a definition file (e.g., =poppler-lumi.def=) where you define the packages to be installed:
+Nothing is compiled, so this is fast. Pass =--build-arg LAIF_BASE=...= to build on
+a different LAIF release than the =%arguments= default.
+
+The =%post= patch asserts that it found exactly one =max_version= site. If that
+assertion trips, LAIF changed TE and the patch needs revisiting — the build fails
+rather than silently shipping an unfused container.
+
+=singularity build= runs =%test= at the end. If it aborts because
+TransformerEngine cannot be imported without a GPU, rebuild with =--notest= and
+run =singularity test $SIF= on a =dev-g= node instead.
+
+* Verify
 
 #+BEGIN_SRC bash
-Bootstrap: localimage
-From: /appl/local/laifs/containers/lumi-multitorch-latest.sif
-
-%post
-    apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y poppler-utils
-    apt-get clean
-    rm -rf /var/lib/apt/lists/*
+singularity test $SIF
 #+END_SRC
 
-Use Singularity to build the new container:
+That covers the CPU-side checks: the ROCm torch build survived the layer, the
+installed flash-attn now falls inside the range TE accepts, and TE bound the
+flash-attn entry points. On a GPU node, check the backend TE actually selects:
 
 #+BEGIN_SRC bash
-singularity build $SIF poppler-lumi.def
+singularity exec $SIF python3 /opt/transformer-engine-smoke.py --gpu
 #+END_SRC
 
-From the allocated shell:
+This runs =DotProductAttention= twice — once normally, once with
+=NVTE_FLASH_ATTN=0= — and asserts that the default run selects FlashAttention,
+uses less memory than the unfused reference, and agrees with it numerically within
+bf16 tolerance. Treat those three as the acceptance gate for the fix.
+
+* Benchmark
+
+A sequence-length sweep reporting peak device memory, step time and the selected
+backend. Both columns come from the same container:
 
 #+BEGIN_SRC bash
-singularity exec $SIF pdftoppm -png sample.pdf sample
+singularity exec $SIF python3 /opt/transformer-engine-smoke.py --bench
+singularity exec $SIF env NVTE_FLASH_ATTN=0 \
+    python3 /opt/transformer-engine-smoke.py --bench
 #+END_SRC
+
+The unfused path OOMs at sequence lengths the fused path handles comfortably.
+Record the table here once measured.
+
+* Run workloads
+
+#+BEGIN_SRC bash
+srun --account=$PROJECT --partition=dev-g --ntasks=1 --cpus-per-task=8 --gpus=1 --mem=60G --time=01:00:00 --nodes=1 --pty bash
+module use /appl/local/laifs/modules
+module load lumi-aif-singularity-bindings
+
+singularity exec $SIF python3 /path/to/your_script.py
+#+END_SRC
+
+Set =NVTE_DEBUG=1 NVTE_DEBUG_LEVEL=2= whenever an attention regression is
+suspected — it is the only way TE reports which backend it chose.
+
+* Fallback
+:PROPERTIES:
+:CUSTOM_ID: fallback
+:END:
+
+If =--gpu= fails the numerics comparison, downgrade flash-attn instead of raising
+TE's cap. =v2.8.0-cktile= is the newest =ROCm/flash-attention= tag inside TE's
+range — there is no =2.8.3= tag — and that combination is already confirmed to
+work on MI250x.
+
+There are no flash-attn wheels on
+=https://repo.radeon.com/rocm/manylinux/rocm-rel-7.0.2/=, so this means a source
+build, and it replaces a kernel the base already compiled for gfx90a. Build the
+wheel once in an allocation longer than the 2 h above, with =BUILD_TARGET=rocm=,
+=GPU_ARCHS=gfx90a= and =MAX_JOBS= matched to =--cpus-per-task=, cache it under
+=/scratch/$PROJECT/$USER/wheels/=, then =%files= it into the image and install it
+with the ROCm stack pinned by a generated constraints file, as
+=feature/anemoi-lumi:anemoi-lumi.def= does.
+
+Where to install it needs care. The other defs in this repo each create a nested
+venv (=/opt/jax-venv=, =/opt/anemoi-venv=, =/opt/sglang-venv=) and their smoke
+tests assert the base torch stayed visible, because =python -m venv
+--system-site-packages= resolves its base from =sys.base_prefix= — so on an image
+whose packages live in =/opt/venv= a nested venv exposes the system
+=dist-packages= instead and hides torch, TE and flash-attn. Check =sys.prefix= and
+=sys.base_prefix= from the diagnosis step before choosing; installing into the
+base's own =/opt/venv= avoids the question.
+
+Verify afterwards that =version("flash-attn")= is =2.8.0= and =torch.__version__=
+is unchanged, then re-run the benchmark: this swaps LAIF's kernel for one built
+from a four-patch-older tag, and only the numbers say whether that costs anything.
+
+* Known upstream issue
+
+The =plus= image pairs a TransformerEngine capped at flash-attn ≤ 2.8.3 with
+flash-attn 2.8.4 /and/ compiles fused attention out, so TE degrades to unfused
+attention on MI250x with no error. Worth reporting to the LUMI AI Factory
+container recipes project.
 
 * References
 - [[https://docs.lumi-supercomputer.eu/software/containers/singularity/]]
 - [[https://docs.lumi-supercomputer.eu/laif/software/ai-environment/]]
+- [[https://github.com/lumi-ai-factory/laifs-container-recipes]]
+- [[https://github.com/ROCm/TransformerEngine]]
+- [[https://github.com/ROCm/flash-attention]]
 
 * Credits
 Original guide by Shanshan Wang. Updated by Anis Rahman.
