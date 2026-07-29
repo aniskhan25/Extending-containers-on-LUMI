@@ -1,0 +1,122 @@
+Bootstrap: localimage
+From: {{ LAIF_BASE }}
+
+%arguments
+    LAIF_BASE=/appl/local/laifs/containers/lumi-multitorch-u24r70f21m50t210-20260513_121430/lumi-multitorch-plus-u24r70f21m50t210-20260513_121430.sif
+
+%labels
+    Author Anis Rahman
+    Description LAIF plus container with TransformerEngine's flash-attn cap relaxed for LUMI MI250x
+
+# MI250x (gfx90a/CDNA2) NOTES
+# ----------------------------
+# The plus base is the full image plus an experimental TransformerEngine
+# (ROCm/TransformerEngine tag v2.8_rocm, built for gfx90a). Two upstream facts
+# combine to disable every optimized attention path:
+#
+#  1. containerfiles/plus/Plus builds TE with NVTE_FUSED_ATTN=0, so no
+#     fused-attention backend is compiled in at all — neither Composable Kernel
+#     nor AOTriton. flash-attn is the only optimized path the image can reach.
+#  2. The full layer builds ROCm/flash-attention @bbe25ba, which reports version
+#     2.8.4, while TE v2.8_rocm hardcodes, at utils.py's FlashAttentionUtils:
+#         max_version = PkgVersion("2.8.3")
+#     The bound is enforced at IMPORT time in the sibling backends.py:
+#         elif fa_utils.version_required <= fa_utils.version <= fa_utils.max_version:
+#             fa_utils.is_installed = True
+#     so is_installed stays False and flash_attn_func / flash_attn_varlen_func /
+#     _flash_attn_fwd / _flash_attn_bwd are left as None — the FlashAttention
+#     backend cannot run no matter what NVTE_FLASH_ATTN says.
+#
+# TE's priority is FusedAttention -> FlashAttention -> UnfusedDotProductAttention,
+# so every attention call lands on the vanilla implementation, which materializes
+# the full batch*heads*seq*seq score matrix and OOMs at realistic sequence lengths.
+#
+# Relaxing the bound unlocks a real kernel rather than a fallback: LAIF builds
+# flash-attention with BUILD_TARGET=rocm GPU_ARCHS=gfx90a and does NOT set
+# FLASH_ATTENTION_TRITON_AMD_ENABLE, so setup.py compiles the flash_attn_2_cuda
+# HIP/composable-kernel extension for gfx90a. Nothing needs recompiling here.
+# Do NOT set FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE in this image — that would
+# switch flash_attn_interface to a Triton backend this image never built.
+#
+# 2.8.4 is a ROCm-fork-only version number; upstream flash-attn 2 stops at 2.8.3,
+# so TE's cap records "newest upstream tested", not a known 2.8.4 defect.
+#
+# %environment and %runscript are deliberately absent: this is a patch layer, so
+# the base image's environment and entrypoint are inherited unchanged.
+
+%files
+    scripts/transformer-engine-smoke.py /opt/transformer-engine-smoke.py
+
+%post
+    set -eux
+
+    chmod a+rx /opt/transformer-engine-smoke.py
+
+    # Raise TE's flash-attn upper bound to the version the base actually ships.
+    #
+    # Deliberately no pip install: the fix is a source edit, so the ROCm torch
+    # stack cannot be perturbed and no constraints file is needed. Nor is a venv
+    # created — the other defs in this repo layer a nested venv on top of the
+    # base, but adding no packages makes that unnecessary here.
+    #
+    # The bound is set to the installed distribution's exact version rather than a
+    # literal "2.8.4". TE reads distribution metadata (get_pkg_version("flash-attn")),
+    # and LAIF retags the wheel with `wretag -q lumi_aif_<arch>_<commit>`; if that
+    # adds a PEP 440 local segment then PkgVersion("2.8.4+local") > PkgVersion("2.8.4")
+    # and a literal bound would still reject the package. Using the installed
+    # version makes the comparison an exact match either way.
+    /opt/venv/bin/python3 - <<'PY'
+import glob
+import importlib.metadata as md
+import pathlib
+import re
+import site
+import sysconfig
+
+installed = md.version("flash_attn")
+pattern = re.compile(r'(max_version\s*=\s*PkgVersion\(")2\.8\.3(")')
+
+roots = {sysconfig.get_paths()["purelib"], *site.getsitepackages()}
+patched = 0
+for root in sorted(roots):
+    for name in glob.glob(f"{root}/transformer_engine/**/*.py", recursive=True):
+        path = pathlib.Path(name)
+        source = path.read_text()
+        patched_source, count = pattern.subn(rf"\g<1>{installed}\g<2>", source)
+        if count:
+            path.write_text(patched_source)
+            patched += count
+            print(f"raised flash-attn max_version to {installed} in {path}")
+            # Drop stale bytecode so the edit cannot be shadowed by a warm cache.
+            for pyc in path.parent.glob(f"__pycache__/{path.stem}.*.pyc"):
+                pyc.unlink()
+                print(f"removed {pyc}")
+
+assert patched == 1, (
+    f"expected exactly 1 flash-attn max_version site, patched {patched}; "
+    "TE's bound moved or was already changed — re-run the diagnosis in README.org "
+    "and update this patch"
+)
+PY
+
+    # Confirm TE's import-time gate now accepts flash-attn. This works without a
+    # GPU: on ROCm the Blackwell branch is skipped, so the plain range check runs.
+    # An unimportable TE only warns — a build node that cannot import TE should not
+    # block the build, and %test re-checks it. A failed assertion does fail the
+    # build: it means the patch did not take effect.
+    if /opt/venv/bin/python3 -c "import transformer_engine.pytorch" 2>/dev/null; then
+        /opt/venv/bin/python3 - <<'PY'
+from transformer_engine.pytorch.attention.dot_product_attention import backends, utils
+
+fa = utils.FlashAttentionUtils
+print(f"flash-attn {fa.version}, TE accepts [{fa.version_required}, {fa.max_version}]")
+assert fa.is_installed, "TE still gated flash-attn off after patching max_version"
+assert backends.flash_attn_func is not None, "TE did not bind flash_attn_func"
+print("TE accepts the installed flash-attn")
+PY
+    else
+        echo "WARNING: TransformerEngine is not importable at build time; verify with 'singularity test' on a GPU node"
+    fi
+
+%test
+    python3 /opt/transformer-engine-smoke.py
