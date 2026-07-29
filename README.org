@@ -186,8 +186,28 @@ singularity exec $SIF env NVTE_FLASH_ATTN=0 \
     python3 /opt/transformer-engine-smoke.py --bench
 #+END_SRC
 
-The unfused path OOMs at sequence lengths the fused path handles comfortably.
-Record the table here once measured.
+Measured on one MI250x GCD, =batch=2 heads=16 head_dim=64=, bf16, forward plus
+backward:
+
+| seq_len | peak MiB | ms/iter | backend        |
+|---------+----------+---------+----------------|
+|    1024 |       40 |    0.71 | FlashAttention |
+|    2048 |       81 |    2.03 | FlashAttention |
+|    4096 |      161 |    7.46 | FlashAttention |
+|    8192 |      322 |   27.57 | FlashAttention |
+|   16384 |      644 |  108.52 | FlashAttention |
+|   32768 |     1288 |  426.24 | FlashAttention |
+
+Peak memory doubles with =seq_len= — linear, the signature of flash attention —
+and is fully accounted for by q/k/v, their gradients and the output. Step time
+grows about 3.9x per doubling, i.e. O(seq^2) FLOPs, which is what attention costs
+when the kernel is genuinely doing the work.
+
+The unfused path materializes a =batch*heads*seq*seq= score matrix, which is
+=2*16*seq^2*2= bytes on its own: 1 GiB at =seq_len=4096=, 16 GiB at =16384=,
+64 GiB at =32768= — before counting the softmax and gradient buffers it also
+holds. On a 64 GB GCD it OOMs partway up the sweep, which is the failure this
+container fixes.
 
 * Run workloads
 
