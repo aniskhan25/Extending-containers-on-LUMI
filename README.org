@@ -60,10 +60,16 @@ export PLUS=/appl/local/laifs/containers/lumi-multitorch-u24r70f21m50t210-202605
 #+END_SRC
 
 Versions, and where the packages live — the latter decides how a layer on top of
-this image must install anything. Note TE version-gates on the *distribution
-metadata* (=get_pkg_version("flash-attn")=), not =flash_attn.__version__=, and
-LAIF retags the wheel with =wretag -q lumi_aif_<arch>_<commit>=, so the two can
-differ:
+this image must install anything. TE version-gates on the *distribution metadata*
+(=get_pkg_version("flash-attn")=), not =flash_attn.__version__=, and LAIF retags
+the wheel with =wretag -q lumi_aif_<arch>_<commit>=, so the two differ in practice:
+=flash_attn.__version__= is =2.8.4= while the metadata reads
+=2.8.4+lumi_aif_gfx90a_bbe25ba=.
+
+That local version segment is why =%post= derives the new cap from
+=importlib.metadata.version()= rather than writing a literal =2.8.4=. Under PEP 440
+=2.8.4+lumi.aif.gfx90a.bbe25ba > 2.8.4=, so a literal bound would still reject the
+package — the patch would appear to apply and change nothing. Do not "simplify" it.
 
 #+BEGIN_SRC bash
 singularity exec $PLUS python3 -c '
@@ -174,6 +180,12 @@ This runs =DotProductAttention= twice — once normally, once with
 =NVTE_FLASH_ATTN=0= — and asserts that the default run selects FlashAttention,
 uses less memory than the unfused reference, and agrees with it numerically within
 bf16 tolerance. Treat those three as the acceptance gate for the fix.
+
+Verified on an MI250X GCD with torch =2.10.0+rocm7.0=, TE =2.8.0+a365f2de= and
+flash-attn =2.8.4+lumi_aif_gfx90a_bbe25ba=: FlashAttention selected, 161 MiB vs
+2344 MiB peak at =seq_len=4096=, and the output and all three input gradients match
+the unfused reference. Raising the cap is therefore validated on this base image,
+and the [[#fallback][fallback]] below is not needed.
 
 * Benchmark
 
