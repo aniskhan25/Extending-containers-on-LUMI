@@ -13,6 +13,12 @@ The --gpu check runs DotProductAttention twice, once normally and once with
 NVTE_FLASH_ATTN=0, and asserts the default run selects FlashAttention, uses less
 memory than the unfused reference, and agrees with it numerically. Each run is a
 separate process because TE evaluates NVTE_FLASH_ATTN at import time.
+
+--bench adds a sequence-length sweep reporting peak device memory and step time,
+which is what makes the fix measurable rather than merely asserted:
+    singularity exec container.sif python3 /opt/transformer-engine-smoke.py --bench
+    singularity exec container.sif env NVTE_FLASH_ATTN=0 \
+        python3 /opt/transformer-engine-smoke.py --bench   # baseline column
 """
 
 from __future__ import annotations
@@ -24,6 +30,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from importlib.metadata import version as dist_version
 from pathlib import Path
 
@@ -32,6 +39,11 @@ BATCH, SEQ, HEADS, HEAD_DIM = 2, 4096, 16, 64
 
 # bf16 accumulation order differs between the fused and unfused kernels.
 ATOL, RTOL = 2e-2, 2e-2
+
+# Sweep for --bench. Unfused attention materializes BATCH*HEADS*seq*seq scores, so
+# it grows quadratically and OOMs partway up; the fused path grows linearly.
+SEQ_LENGTHS = [1024, 2048, 4096, 8192, 16384, 32768]
+WARMUP, ITERS = 3, 10
 
 
 def check_import(name: str) -> str:
@@ -251,10 +263,64 @@ def check_gpu() -> int:
     return failed
 
 
+def bench() -> int:
+    """Sequence-length sweep: peak memory, step time and backend."""
+    import torch
+
+    if not torch.cuda.is_available():
+        print("FAIL  no ROCm device visible; --bench needs a GPU allocation")
+        return 1
+
+    oom_errors = tuple(
+        exc for exc in (getattr(torch, "OutOfMemoryError", None),
+                        getattr(torch.cuda, "OutOfMemoryError", None))
+        if exc is not None
+    ) or (RuntimeError,)
+
+    forced = os.environ.get("NVTE_FLASH_ATTN") == "0"
+    print(f"\nsweep: batch={BATCH} heads={HEADS} head_dim={HEAD_DIM} dtype=bfloat16"
+          f"{'  NVTE_FLASH_ATTN=0' if forced else ''}")
+    print(f"{'seq_len':>8}  {'peak MiB':>10}  {'ms/iter':>10}  backend")
+
+    for seq in SEQ_LENGTHS:
+        try:
+            module, qkv = make_dpa(seq)
+
+            def step() -> None:
+                for tensor in qkv:
+                    tensor.grad = None
+                module(*qkv).sum().backward()
+
+            for _ in range(WARMUP):
+                step()
+            torch.cuda.synchronize()
+
+            torch.cuda.reset_peak_memory_stats()
+            start = time.perf_counter()
+            for _ in range(ITERS):
+                step()
+            torch.cuda.synchronize()
+
+            elapsed_ms = (time.perf_counter() - start) * 1e3 / ITERS
+            peak_mib = torch.cuda.max_memory_allocated() / 2**20
+            print(f"{seq:>8}  {peak_mib:>10.0f}  {elapsed_ms:>10.2f}  "
+                  f"{selected_backend()}")
+        except oom_errors as exc:
+            if "out of memory" not in str(exc).lower():
+                raise
+            print(f"{seq:>8}  {'OOM':>10}  {'-':>10}  -")
+        finally:
+            torch.cuda.empty_cache()
+
+    return 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--gpu", action="store_true",
                         help="Assert backend selection (run on a GPU node)")
+    parser.add_argument("--bench", action="store_true",
+                        help="Sequence-length sweep of peak memory and step time")
     parser.add_argument("--dpa-child", metavar="PATH", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
@@ -265,6 +331,10 @@ def main() -> None:
     failed = check_versions()
     if args.gpu and not failed:
         failed += check_gpu()
+    # Deliberately not gated on `failed`: the sweep is diagnostic, and running it
+    # on the unpatched image is how the "before" column gets measured.
+    if args.bench:
+        failed += bench()
 
     if failed:
         raise SystemExit(f"{failed} check(s) failed")
