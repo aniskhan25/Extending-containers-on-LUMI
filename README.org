@@ -104,12 +104,22 @@ singularity exec -B $PWD/scripts:/scripts $PLUS \
 #+END_SRC
 
 Confirm fused attention really is absent from the build, rather than merely
-rejected for this configuration:
+rejected for this configuration. Inspect the shipped libraries rather than
+importing anything, since TE's extension module is not always named
+=transformer_engine_torch=:
 
 #+BEGIN_SRC bash
-singularity exec $PLUS python3 -c \
-    'import transformer_engine_torch as tex; print([n for n in dir(tex) if "fused_attn" in n.lower()])'
+singularity exec $PLUS bash -lc \
+    'find /opt/venv -name "libtransformer_engine*" -o -name "*aotriton*" -o -name "*ck_fused_attn*" | head'
 #+END_SRC
+
+If nothing matching =aotriton= or =ck_fused_attn= appears, no fused-attention
+backend was compiled in, which is what =NVTE_FUSED_ATTN=0= in LAIF's recipe
+implies.
+
+Every command in this section assumes =python3= resolves to the venv interpreter.
+If the imports above fail wholesale, check =singularity exec $PLUS which python3=
+and use =/opt/venv/bin/python3= explicitly.
 
 * Build the container
 

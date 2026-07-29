@@ -80,13 +80,23 @@ def check_versions() -> int:
     """CPU-safe checks. Returns the number of failures."""
     failed = 0
 
-    for pkg in ["torch", "flash_attn", "transformer_engine", "transformer_engine_torch"]:
+    # A wrong interpreter is the likeliest reason for a wall of import failures:
+    # the LAIF packages live in a venv, so /usr/bin/python3 sees none of them.
+    print(f"interpreter:          {sys.executable}")
+    print(f"sys.prefix:           {sys.prefix}")
+
+    for pkg in ["torch", "flash_attn", "transformer_engine"]:
         result = check_import(pkg)
         print(result)
         if result.startswith("FAIL"):
             failed += 1
     if failed:
         return failed
+
+    # Informational only. TE's PyTorch extension is named transformer_engine_torch
+    # in some builds and bundled into the transformer_engine package in others, so
+    # its absence under this name is not itself a problem.
+    print(check_import("transformer_engine_torch").replace("FAIL", "note", 1))
 
     import torch
 

@@ -119,4 +119,6 @@ PY
     fi
 
 %test
-    python3 /opt/transformer-engine-smoke.py
+    # The base image's packages live in /opt/venv; call that interpreter directly
+    # rather than relying on whatever python3 resolves to in the test environment.
+    /opt/venv/bin/python3 /opt/transformer-engine-smoke.py
