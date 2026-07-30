@@ -6,6 +6,10 @@
 This guide builds a container that restores fused attention in the LUMI AI Factory
 =plus= image on MI250x.
 
+It is a workaround, not a fix: the defect is upstream in the =plus= image and is
+already tracked on the LAIF container recipes repo. Drop this container once the
+maintainers ship a base image that builds a fused-attention backend.
+
 * Why this container exists
 
 Out of the box the =plus= image runs every attention call through
@@ -67,6 +71,12 @@ Pass =--build-arg LAIF_BASE=...= to build on a different LAIF release. The
 =%post= patch asserts it found exactly one =max_version= site, so a base-image
 bump fails the build loudly rather than silently shipping unfused attention.
 
+The patch derives the new cap from =importlib.metadata.version("flash_attn")=
+rather than a literal =2.8.4=. LAIF retags the wheel with
+=wretag -q lumi_aif_<arch>_<commit>=, and under PEP 440
+=2.8.4+lumi.aif.gfx90a.bbe25ba > 2.8.4=, so a literal bound would still reject the
+package — the patch would appear to apply and change nothing.
+
 * Verify
 
 #+BEGIN_SRC bash
@@ -126,34 +136,6 @@ singularity exec $SIF python3 /path/to/your_script.py
 
 Set =NVTE_DEBUG=1 NVTE_DEBUG_LEVEL=2= whenever an attention regression is
 suspected — it is the only way TE reports which backend it chose.
-
-* Fallback
-:PROPERTIES:
-:CUSTOM_ID: fallback
-:END:
-
-If a future base image fails the numerics comparison, downgrade flash-attn instead
-of raising TE's cap. =v2.8.0-cktile= is the newest =ROCm/flash-attention= tag
-inside TE's range — there is no =2.8.3= tag — and it is confirmed working on
-MI250x. There are no flash-attn wheels on
-=https://repo.radeon.com/rocm/manylinux/rocm-rel-7.0.2/=, so build the wheel once
-with =BUILD_TARGET=rocm GPU_ARCHS=gfx90a=, cache it on =/scratch=, then =%files=
-it in and install it into the base's =/opt/venv= with the ROCm stack pinned by a
-constraints file, as =feature/anemoi-lumi:anemoi-lumi.def= does.
-
-Note the =%post= patch derives the new cap from
-=importlib.metadata.version("flash_attn")= rather than a literal =2.8.4=. LAIF
-retags the wheel with =wretag -q lumi_aif_<arch>_<commit>=, and under PEP 440
-=2.8.4+lumi.aif.gfx90a.bbe25ba > 2.8.4=, so a literal bound would still reject the
-package — the patch would appear to apply and change nothing.
-
-* Known upstream issue
-
-The =plus= image pairs a TE capped at flash-attn ≤ 2.8.3 with flash-attn 2.8.4
-/and/ compiles fused attention out, so TE degrades to unfused attention on MI250x
-with no error. The structural fix is for LAIF to build the image with
-=NVTE_FUSED_ATTN=1 NVTE_FUSED_ATTN_AOTRITON=1=, making it independent of the
-flash-attn version. Worth reporting upstream.
 
 * References
 - [[https://docs.lumi-supercomputer.eu/software/containers/singularity/]]
