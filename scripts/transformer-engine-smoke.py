@@ -3,7 +3,7 @@
 
 Run during build (%test): validates the ROCm torch stack, that TE's flash-attn
 version gate now accepts the installed flash-attn, and that TE actually bound the
-flash-attn entry points. No GPU required — TE's gate runs on import.
+flash-attn entry points. No GPU required - TE's gate runs on import.
 
 Run post-build on a GPU node to validate which backend a real forward+backward
 lands on:
@@ -71,7 +71,7 @@ def flash_attn_utils():
         if wanted <= set(getattr(obj, "__dict__", {})):
             return name, obj
     raise SystemExit(
-        f"could not locate TE's flash-attn version bounds in {utils.__file__} — "
+        f"could not locate TE's flash-attn version bounds in {utils.__file__} - "
         "TE's layout changed; re-run the introspection step in README.org"
     )
 
@@ -109,7 +109,7 @@ def check_versions() -> int:
         failed += 1
 
     # TE gates on distribution metadata, not flash_attn.__version__, and LAIF
-    # retags the wheel — so report the string TE actually compares against.
+    # retags the wheel - so report the string TE actually compares against.
     print(f"flash-attn metadata:  {dist_version('flash-attn')}")
 
     name, fa = flash_attn_utils()
@@ -121,7 +121,7 @@ def check_versions() -> int:
             f"FAIL  TE gated flash-attn off at import time: {fa.version} is outside "
             f"[{fa.version_required}, {fa.max_version}]. The FlashAttention backend "
             "cannot run, and with fused attention absent from this image TE falls "
-            "back to UnfusedDotProductAttention — materialized O(seq^2) scores, "
+            "back to UnfusedDotProductAttention - materialized O(seq^2) scores, "
             "which is the OOM this container exists to fix."
         )
         failed += 1
@@ -134,7 +134,7 @@ def check_versions() -> int:
                    "_flash_attn_fwd", "_flash_attn_bwd"):
         bound = getattr(backends, symbol, None)
         if bound is None:
-            print(f"FAIL  backends.{symbol} is None — TE did not bind flash-attn")
+            print(f"FAIL  backends.{symbol} is None - TE did not bind flash-attn")
             failed += 1
         else:
             print(f"ok    backends.{symbol}")
@@ -252,7 +252,7 @@ def check_gpu() -> int:
               f"{unfused_peak:.0f} MiB with NVTE_FLASH_ATTN=0")
 
         if backend != "FlashAttention":
-            print(f"FAIL  TE selected {backend}, not FlashAttention — the fix is not "
+            print(f"FAIL  TE selected {backend}, not FlashAttention - the fix is not "
                   "in effect. TE's own reasoning:\n" + flash_log)
             failed += 1
         if flash_peak >= unfused_peak:
