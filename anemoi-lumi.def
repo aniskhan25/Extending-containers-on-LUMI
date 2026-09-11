@@ -45,6 +45,18 @@ PY
     export PATH=/opt/anemoi-venv/bin:$PATH
     export VIRTUAL_ENV=/opt/anemoi-venv
     export PYTHONNOUSERSITE=1
+
+    # The LAIF base puts its own /opt/venv on PYTHONPATH (see
+    # /.singularity.d/env/10-docker2singularity.sh, which is sourced before
+    # this block). That entry precedes this venv's site-packages on sys.path,
+    # so without the prepend below the base's copies shadow the pins installed
+    # here -- notably zarr>=3, while anemoi-datasets requires zarr<3.
+    for _sp in /opt/anemoi-venv/lib/python*/site-packages; do
+        [ -d "$_sp" ] && PYTHONPATH="$_sp${PYTHONPATH:+:$PYTHONPATH}"
+    done
+    export PYTHONPATH
+    unset _sp
+
     export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
 
 %runscript
