@@ -1,13 +1,26 @@
-#+TITLE: Extending Containers on LUMI — Anemoi
+#+TITLE: Extending Containers on LUMI - Anemoi
 #+AUTHOR: Anis Rahman
 #+OPTIONS: toc:nil
 #+OPTIONS: num:nil
 
 This guide shows how to build the Anemoi container on LUMI and use it to run
 the training jobs in [[https://github.com/aniskhan25/anemoi-demo][anemoi-demo]].
-The container extends the LUMI AI Factory multi-framework container
-(=/appl/local/laifs/containers/lumi-multitorch-latest.sif=) and bakes in the
-full Anemoi training stack, so no per-run virtual environment setup is needed.
+The container extends the LUMI AI Factory multi-framework container and bakes
+in the full Anemoi training stack, so no per-run virtual environment setup is
+needed.
+
+The base image is pinned to a specific LAIF build rather than tracking
+=lumi-multitorch-latest.sif=, so the same definition file always produces the
+same ROCm and PyTorch stack:
+
+#+BEGIN_SRC text
+/appl/local/laifs/containers/lumi-multitorch-u24r70f21m50t210-20260807_115122/lumi-multitorch-full-u24r70f21m50t210-20260807_115122.sif
+#+END_SRC
+
+The pin lives in =%arguments= in =anemoi-lumi.def= and is the single line to
+bump when moving to a newer LAIF image. To build against a different base
+without editing the file, pass =--build-arg LAIF_BASE=/path/to/base.sif= to
+=singularity build=.
 
 * Build the container
 
@@ -15,7 +28,8 @@ Container builds require significant memory. Allocate resources on a login node 
 
 #+BEGIN_SRC bash
 export PROJECT=<your-project>
-export SIF=/scratch/$PROJECT/$USER/anemoi-lumi.sif
+export CONTAINER_DIR=/scratch/$PROJECT/$USER/containers
+export SIF=$CONTAINER_DIR/anemoi-lumi-u24r70f21m50t210.sif
 #+END_SRC
 
 #+BEGIN_SRC bash
@@ -29,7 +43,7 @@ module purge
 module load CrayEnv
 module load PRoot
 
-mkdir -p /tmp/$USER
+mkdir -p /tmp/$USER $CONTAINER_DIR
 export SINGULARITY_TMPDIR=/tmp/$USER
 export SINGULARITY_CACHEDIR=/tmp/$USER
 
@@ -42,6 +56,16 @@ Verify the build:
 singularity test $SIF
 #+END_SRC
 
+Built containers live in =/scratch/$PROJECT/$USER/containers/=, named after the
+LAIF base they extend. =anemoi-lumi.sif= there is a symlink to the current
+build, so job scripts can point at a stable path while the tagged files keep a
+record of which base each one came from. Once the test passes, move the symlink:
+
+#+BEGIN_SRC bash
+ln -sfn $(basename $SIF) $CONTAINER_DIR/anemoi-lumi.sif
+ls -l $CONTAINER_DIR/
+#+END_SRC
+
 * Run the Anemoi demos
 
 The demo repository lives at =/scratch/$PROJECT/$USER/anemoi-demo/=.
@@ -49,13 +73,13 @@ The venv is baked into the container at =/opt/anemoi-venv=, so
 =scripts/install_venv.sh= is not needed.
 
 =env/lumi-env.sh= uses =${VAR:-default}= for all paths, so override
-=CONTAINER= and =ANEMOI_VENV= by exporting them before =sbatch= — the job
+=CONTAINER= and =ANEMOI_VENV= by exporting them before =sbatch= - the job
 inherits the calling environment and =lumi-env.sh= picks up the pre-set values.
 
 #+BEGIN_SRC bash
 cd /scratch/$PROJECT/$USER/anemoi-demo
 
-export CONTAINER=/scratch/$PROJECT/$USER/anemoi-lumi.sif
+export CONTAINER=/scratch/$PROJECT/$USER/containers/anemoi-lumi.sif
 export ANEMOI_VENV=/opt/anemoi-venv
 
 sbatch jobs/validate_minimal.sh
