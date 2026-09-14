@@ -1,63 +1,130 @@
-#+TITLE: Extending Containers on LUMI
-#+AUTHOR: Shanshan Wang
+#+TITLE: Extending Containers on LUMI - MuseTalk
+#+AUTHOR: Anis Rahman
 #+OPTIONS: toc:nil
 #+OPTIONS: num:nil
 
-This guide shows how to extend the current LUMI AI Factory container with Poppler.
-The current LUMI AI Factory multi-framework container is available at =/appl/local/laifs/containers/lumi-multitorch-latest.sif=.
+This guide runs [[https://github.com/TMElyralab/MuseTalk][MuseTalk]] V1.5 inference on LUMI, on one MI250x GCD, inside a
+container that extends the LUMI AI Factory multi-framework image. MuseTalk's own
+=requirements.txt= targets torch 2.0.1 and numpy 1.x, and installing it on top of a ROCm
+PyTorch image replaces the ROCm stack with PyPI CPU wheels, so the container here
+installs only the packages the LAIF base genuinely lacks and pins the rest to what the
+base ships.
 
-Building containers requires memory, so run these commands on a LUMI login node and allocate resources before extending the container:
+The base image is pinned to a specific LAIF build rather than tracking
+=lumi-multitorch-latest.sif=, so the same definition file always produces the same ROCm
+and PyTorch stack:
+
+#+BEGIN_SRC text
+/appl/local/laifs/containers/lumi-multitorch-u24r70f21m50t210-20260807_115122/lumi-multitorch-full-u24r70f21m50t210-20260807_115122.sif
+#+END_SRC
+
+The pin lives in =%arguments= in =musetalk-lumi.def= and is the single line to bump when
+moving to a newer LAIF image. To build against a different base without editing the
+file, pass =--build-arg LAIF_BASE=/path/to/base.sif= to =singularity build=.
+
+* What upstream MuseTalk needs changed
+
+Two things stop the unpatched tree from running here, both applied by
+=scripts/musetalk-patch-for-lumi.py=:
+
+- =musetalk/utils/preprocessing.py= imports =mmpose= at module scope to run DWPose for
+  face landmarks. mmcv, the mmpose backend, has no ROCm build, so the module cannot even
+  be imported. =scripts/musetalk-preprocessing-mediapipe.py= replaces it with MediaPipe's
+  FaceLandmarker, re-indexed to the same 68-point dlib layout the DWPose slice produced,
+  leaving the rest of the pipeline and the S3FD face detector untouched.
+- PyTorch 2.6 changed the default of =weights_only= in =torch.load= from =False= to
+  =True=, and =face-parse-bisent/resnet18-5c106cde.pth= is in the legacy =.tar= format,
+  which cannot be read under =weights_only=True= at all.
+
+* Fetch the source and the weights
+
+Run this on a login node: compute nodes have no internet access. It clones MuseTalk,
+downloads ~4 GB of weights, and primes the torch hub cache that S3FD needs at runtime.
 
 #+BEGIN_SRC bash
-export PROJECT=<project>
+export PROJECT=<your-project>
 #+END_SRC
 
 #+BEGIN_SRC bash
-export SIF=/scratch/$PROJECT/$USER/lumi-poppler.sif
+scripts/fetch-musetalk-assets.sh
+#+END_SRC
+
+#+BEGIN_SRC bash
+scripts/musetalk-patch-for-lumi.py /scratch/$PROJECT/$USER/musetalk/MuseTalk
+#+END_SRC
+
+* Build the container
+
+Container builds require significant memory. Allocate resources on a login node first:
+
+#+BEGIN_SRC bash
+export CONTAINER_DIR=/scratch/$PROJECT/$USER/containers
+export SIF=$CONTAINER_DIR/musetalk-lumi-u24r70f21m50t210.sif
 #+END_SRC
 
 #+BEGIN_SRC bash
 srun --account=$PROJECT --partition=small --ntasks=1 --cpus-per-task=8 --mem=120G --time=02:00:00 --nodes=1 --pty bash
 #+END_SRC
 
+Then load the required modules and build:
+
 #+BEGIN_SRC bash
 module purge
 module load CrayEnv
 module load PRoot
 
-mkdir -p /tmp/$USER
+mkdir -p /tmp/$USER $CONTAINER_DIR
 export SINGULARITY_TMPDIR=/tmp/$USER
 export SINGULARITY_CACHEDIR=/tmp/$USER
+
+singularity build $SIF musetalk-lumi.def
 #+END_SRC
 
-Create a definition file (e.g., =poppler-lumi.def=) where you define the packages to be installed:
+Verify the build:
 
 #+BEGIN_SRC bash
-Bootstrap: localimage
-From: /appl/local/laifs/containers/lumi-multitorch-latest.sif
-
-%post
-    apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y poppler-utils
-    apt-get clean
-    rm -rf /var/lib/apt/lists/*
+singularity test $SIF
 #+END_SRC
 
-Use Singularity to build the new container:
+Once the test passes, move the symlink so job scripts can point at a stable path:
 
 #+BEGIN_SRC bash
-singularity build $SIF poppler-lumi.def
+ln -sfn $(basename $SIF) $CONTAINER_DIR/musetalk-lumi.sif
 #+END_SRC
 
-From the allocated shell:
+* First run compiles MIOpen kernels
+
+The LAIF image ships MIOpen's perf databases for gfx90a but no precompiled kernel
+database -- there is no =.kdb= anywhere in it, where LUMI's own
+=/appl/local/containers/sif-images/lumi-pytorch-rocm-*= images carry a 351 MB
+=gfx90a.kdb=. Every convolution shape therefore gets compiled from source the first time
+it is seen, and MuseTalk's S3FD face detector alone runs 31 convolutions over a
+full-resolution video frame.
+
+=scripts/musetalk-inference.sh= points =MIOPEN_USER_DB_PATH= and
+=MIOPEN_CUSTOM_CACHE_DIR= at =miopen-cache/= in the workspace and keeps it across jobs,
+so only the first run pays for this. Do not delete that directory between runs, and do
+not put it on =/tmp=, which is node-local and gone by the next job.
+
+* Run inference
 
 #+BEGIN_SRC bash
-singularity exec $SIF pdftoppm -png sample.pdf sample
+cd /scratch/$PROJECT/$USER/musetalk
+#+END_SRC
+
+#+BEGIN_SRC bash
+export CONTAINER=/scratch/$PROJECT/$USER/containers/musetalk-lumi.sif
+export VENV=/opt/musetalk-venv
+#+END_SRC
+
+#+BEGIN_SRC bash
+sbatch --chdir=$PWD scripts/musetalk-inference.sh
 #+END_SRC
 
 * References
 - [[https://docs.lumi-supercomputer.eu/software/containers/singularity/]]
 - [[https://docs.lumi-supercomputer.eu/laif/software/ai-environment/]]
+- [[https://github.com/TMElyralab/MuseTalk]]
 
 * Credits
 Original guide by Shanshan Wang. Updated by Anis Rahman.

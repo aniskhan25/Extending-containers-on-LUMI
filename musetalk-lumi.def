@@ -1,0 +1,103 @@
+Bootstrap: localimage
+From: {{ LAIF_BASE }}
+
+%arguments
+    LAIF_BASE=/appl/local/laifs/containers/lumi-multitorch-u24r70f21m50t210-20260807_115122/lumi-multitorch-full-u24r70f21m50t210-20260807_115122.sif
+
+%labels
+    Author Anis Rahman
+    Description LAIF PyTorch container extended for MuseTalk V1.5 inference on LUMI
+
+# MI250x (gfx90a/CDNA2) NOTES
+#
+# MuseTalk's requirements.txt is numpy-1 era and pinned against torch 2.0.1. Installing
+# it verbatim on top of this base replaces the LAIF ROCm PyTorch stack with PyPI CPU
+# wheels, so only the packages the base genuinely lacks are installed here, under a
+# constraints file that freezes torch/torchvision/torchaudio/triton/numpy/transformers
+# to what the base ships. Dropped on purpose:
+#
+#   numpy==1.23.5           no cp312 wheel; the base's numpy 2.3.5 is what torch is
+#                           built against, and opencv/mediapipe here accept numpy 2
+#   opencv-python==4.9.0.80 mediapipe pulls opencv-contrib-python 5.0.0.93, matching
+#                           the base's own cv2 5.0.0
+#   transformers==4.39.2    a downgrade of the base's 5.10.1; MuseTalk only uses
+#                           WhisperModel and AutoFeatureExtractor, both unchanged
+#   tensorflow==2.12.0      training-only, no cp312 wheel, and it drags a second
+#                           protobuf/abseil/OpenMP runtime into the process
+#   gradio                  the demo app only
+#
+# libegl1/libgles2: MediaPipe 1.0's native library (tasks/c/libmediapipe.so) links
+# libEGL.so.1 and libGLESv2.so.2 even on the CPU inference path. The base image ships
+# neither, so `FaceLandmarker.create_from_options` dies with
+# "OSError: libEGL.so.1: cannot open shared object file". These are the libglvnd
+# dispatch stubs; no GPU driver component is involved.
+#
+# MediaPipe replaces DWPose for face landmarks. mmcv, the mmpose backend, has no ROCm
+# build, and upstream musetalk/utils/preprocessing.py imports mmpose at module scope, so
+# the unpatched tree cannot even be imported here. See
+# scripts/musetalk-preprocessing-mediapipe.py, installed into the MuseTalk checkout by
+# scripts/musetalk-patch-for-lumi.py.
+
+%files
+    scripts/musetalk-smoke.py /opt/musetalk-smoke.py
+
+%post
+    set -eux
+
+    chmod a+rx /opt/musetalk-smoke.py
+
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libegl1 libgles2
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+
+    python -m venv --system-site-packages /opt/musetalk-venv
+    . /opt/musetalk-venv/bin/activate
+
+    python -m pip install --no-cache-dir --upgrade pip
+
+    # Pin the base stack so pip cannot swap in PyPI (CPU/CUDA) wheels. Emit plain
+    # name==version lines (not pip freeze's "@ file://" form, which makes pip try to
+    # reinstall from a wheel path that no longer exists).
+    python - > /opt/base-constraints.txt <<'PY'
+from importlib.metadata import PackageNotFoundError, version
+for pkg in ("torch", "torchvision", "torchaudio", "pytorch-triton", "triton",
+            "numpy", "transformers", "accelerate", "huggingface-hub"):
+    try:
+        print(f"{pkg}=={version(pkg)}")
+    except PackageNotFoundError:
+        pass
+PY
+
+    python -m pip install --no-cache-dir -c /opt/base-constraints.txt \
+        'diffusers==0.40.0' \
+        'mediapipe==1.0.1' \
+        'librosa==1.0.0' \
+        'soundfile==0.14.0' \
+        'omegaconf==2.3.1' \
+        'ffmpeg-python==0.2.0' \
+        'imageio[ffmpeg]==2.37.4'
+
+%environment
+    export PATH=/opt/musetalk-venv/bin:$PATH
+    export VIRTUAL_ENV=/opt/musetalk-venv
+    export PYTHONNOUSERSITE=1
+
+    # The LAIF base puts its own /opt/venv on PYTHONPATH (see
+    # /.singularity.d/env/10-docker2singularity.sh, which is sourced before this
+    # block). That entry precedes this venv's site-packages on sys.path, so without
+    # the prepend below the base's copies shadow the pins installed here.
+    for _sp in /opt/musetalk-venv/lib/python*/site-packages; do
+        [ -d "$_sp" ] && PYTHONPATH="$_sp${PYTHONPATH:+:$PYTHONPATH}"
+    done
+    export PYTHONPATH
+    unset _sp
+
+    export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
+
+%runscript
+    exec python "$@"
+
+%test
+    python /opt/musetalk-smoke.py
