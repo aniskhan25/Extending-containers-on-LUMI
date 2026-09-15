@@ -96,6 +96,15 @@ PY
 
     export OMP_NUM_THREADS=${OMP_NUM_THREADS:-1}
 
+    # mediapipe pulls in matplotlib, which warns on every import when it cannot write a
+    # config directory -- $HOME is read-only under singularity on a compute node.
+    export MPLCONFIGDIR=${MPLCONFIGDIR:-/tmp/matplotlib-$USER}
+
+    # librosa JITs through numba, which by default caches next to its own source files.
+    # Those live in this read-only venv, so the run dies with "cannot cache function
+    # '__o_fold': no locator available".
+    export NUMBA_CACHE_DIR=${NUMBA_CACHE_DIR:-/tmp/numba-$USER}
+
 %runscript
     exec python "$@"
 

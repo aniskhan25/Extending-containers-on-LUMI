@@ -25,7 +25,7 @@
 #   CONFIG     - MuseTalk inference config (default: configs/inference/test.yaml)
 #
 # An hour of wall time is for the first run, which compiles MIOpen kernels. Once
-# miopen-cache/ is warm the same job finishes in a few minutes.
+# miopen-cache/ in the workspace is warm the same job finishes in a few minutes.
 
 set -euo pipefail
 
@@ -39,16 +39,41 @@ module purge
 module use /appl/local/laifs/modules
 module load lumi-aif-singularity-bindings
 
-# MIOpen aborts if it cannot write its kernel cache, and $HOME is not a good place for
-# it on a shared filesystem. Keep this directory across jobs: the LAIF image ships
-# MIOpen's gfx90a *perf* databases but no precompiled kernel database (no .kdb, unlike
-# LUMI's own lumi-pytorch-rocm images), so every convolution shape is compiled from
-# source on first use. S3FD alone has 31 convolutions over a full video frame, which is
-# a one-off cost of roughly ten minutes -- paid once, then served from here.
-MIOPEN_DIR="$WORKDIR/miopen-cache"
-mkdir -p "$MIOPEN_DIR" "$RESULT_DIR"
+# MIOpen kernel cache. Two facts drive the handling below.
+#
+# The LAIF image ships MIOpen's gfx90a *perf* databases but no precompiled kernel
+# database -- there is no .kdb anywhere in it, unlike LUMI's own lumi-pytorch-rocm
+# images, which carry a 351 MB gfx90a.kdb. So every convolution shape MuseTalk uses is
+# searched for and compiled from source the first time it is seen. S3FD alone runs 31
+# convolutions over a full-resolution frame.
+#
+# And MIOpen's cache is a SQLite database, which is pathologically slow on Lustre:
+# measured on one MI250x GCD, the same cold S3FD layers cost ~100 s each with the cache
+# on /scratch versus ~25 s each on node-local /tmp. So the live cache goes on /tmp, is
+# seeded from the workspace copy at job start, and is copied back at the end. The first
+# run pays the compile; later runs start warm.
+MIOPEN_PERSIST="$WORKDIR/miopen-cache"
+MIOPEN_DIR="/tmp/$USER/miopen-${SLURM_JOB_ID:-interactive}"
+mkdir -p "$MIOPEN_PERSIST" "$MIOPEN_DIR" "$RESULT_DIR"
+cp -a "$MIOPEN_PERSIST/." "$MIOPEN_DIR/" 2>/dev/null || true
+# Copying back assumes one job at a time writes the workspace cache. Two concurrent
+# jobs will not corrupt anything, but the last one to finish wins.
+trap 'cp -a "$MIOPEN_DIR/." "$MIOPEN_PERSIST/" 2>/dev/null || true' EXIT TERM
 export SINGULARITYENV_MIOPEN_USER_DB_PATH="$MIOPEN_DIR"
 export SINGULARITYENV_MIOPEN_CUSTOM_CACHE_DIR="$MIOPEN_DIR"
+
+# In its default find mode MIOpen auto-tunes any convolution it has no perf-db entry
+# for, benchmarking several hundred configurations per layer -- "[SearchImpl] Runs
+# left: 431" in the log, at three to four minutes a layer, which does not finish inside
+# an hour of wall time for MuseTalk. FAST skips the tuning and picks a solver from
+# heuristics, leaving only the compile. The kernels are marginally slower than fully
+# tuned ones; the tuning would take longer than every run it could ever speed up.
+export SINGULARITYENV_MIOPEN_FIND_MODE=FAST
+
+# FAST still lets a few tunable solvers tune, and each of those costs several minutes
+# unbounded. Cap it: MuseTalk's U-Net has dozens of distinct convolution shapes, and
+# tuning them all to completion takes hours of GPU time to save seconds of inference.
+export SINGULARITYENV_MIOPEN_TUNING_TIME_MS_MAX=10000
 
 # S3FD downloads its weights from the internet on first use, which compute nodes cannot
 # reach. fetch-musetalk-assets.sh primes this cache from a login node.
@@ -59,6 +84,10 @@ export SINGULARITYENV_HF_HUB_OFFLINE=1
 export SINGULARITYENV_PYTHONNOUSERSITE=1
 export SINGULARITYENV_PYTHONUNBUFFERED=1
 export SINGULARITYENV_TOKENIZERS_PARALLELISM=false
+export SINGULARITYENV_MPLCONFIGDIR="/tmp/$USER/matplotlib"
+# librosa JITs through numba, which caches next to its own source files -- read-only
+# inside the container ("cannot cache function '__o_fold': no locator available").
+export SINGULARITYENV_NUMBA_CACHE_DIR="/tmp/$USER/numba"
 
 # Only needed when running against the plain LAIF base: MediaPipe's native library links
 # libEGL/libGLESv2, which the base image does not ship. musetalk-lumi.def installs them,
@@ -70,7 +99,7 @@ echo "container: $CONTAINER"
 echo "venv:      $VENV"
 echo "config:    $CONFIG"
 
-srun singularity exec "$CONTAINER" bash -c "
+srun singularity exec -B /tmp:/tmp "$CONTAINER" bash -c "
 set -euo pipefail
 export LD_LIBRARY_PATH=\${MUSETALK_EXTRA_LIBS:+\$MUSETALK_EXTRA_LIBS:}\${LD_LIBRARY_PATH:-}
 

@@ -10,6 +10,11 @@ PyTorch image replaces the ROCm stack with PyPI CPU wheels, so the container her
 installs only the packages the LAIF base genuinely lacks and pins the rest to what the
 base ships.
 
+Verified on MI250x with torch =2.10.0+rocm7.0= (HIP 7.0.51831), mediapipe =1.0.1=,
+diffusers =0.40.0=, transformers =5.10.1=, numpy =2.3.5=, cv2 =5.0.0=, librosa =1.0.0=.
+Both tasks in =configs/inference/test.yaml= produce video: 704x1216 H.264 with AAC
+audio, 200 frames / 8 s and 1500 frames / 60 s, matching their input audio.
+
 The base image is pinned to a specific LAIF build rather than tracking
 =lumi-multitorch-latest.sif=, so the same definition file always produces the same ROCm
 and PyTorch stack:
@@ -24,8 +29,7 @@ file, pass =--build-arg LAIF_BASE=/path/to/base.sif= to =singularity build=.
 
 * What upstream MuseTalk needs changed
 
-Two things stop the unpatched tree from running here, both applied by
-=scripts/musetalk-patch-for-lumi.py=:
+Two source changes, both applied by =scripts/musetalk-patch-for-lumi.py=:
 
 - =musetalk/utils/preprocessing.py= imports =mmpose= at module scope to run DWPose for
   face landmarks. mmcv, the mmpose backend, has no ROCm build, so the module cannot even
@@ -35,6 +39,17 @@ Two things stop the unpatched tree from running here, both applied by
 - PyTorch 2.6 changed the default of =weights_only= in =torch.load= from =False= to
   =True=, and =face-parse-bisent/resnet18-5c106cde.pth= is in the legacy =.tar= format,
   which cannot be read under =weights_only=True= at all.
+
+Three things the container supplies that the base image does not:
+
+- =libegl1= and =libgles2=. MediaPipe 1.0's native library links =libEGL.so.1= and
+  =libGLESv2.so.2= even on the CPU inference path, and without them
+  =FaceLandmarker.create_from_options= fails with =OSError: libEGL.so.1: cannot open
+  shared object file=.
+- =NUMBA_CACHE_DIR=. librosa JITs through numba, which caches next to its own source
+  files -- read-only inside the container, so the run dies with =cannot cache function
+  '__o_fold': no locator available=.
+- =MPLCONFIGDIR=, for the same read-only reason, via mediapipe's matplotlib dependency.
 
 * Fetch the source and the weights
 
@@ -92,19 +107,37 @@ Once the test passes, move the symlink so job scripts can point at a stable path
 ln -sfn $(basename $SIF) $CONTAINER_DIR/musetalk-lumi.sif
 #+END_SRC
 
-* First run compiles MIOpen kernels
+* MIOpen dominates the first run
 
 The LAIF image ships MIOpen's perf databases for gfx90a but no precompiled kernel
 database -- there is no =.kdb= anywhere in it, where LUMI's own
 =/appl/local/containers/sif-images/lumi-pytorch-rocm-*= images carry a 351 MB
-=gfx90a.kdb=. Every convolution shape therefore gets compiled from source the first time
-it is seen, and MuseTalk's S3FD face detector alone runs 31 convolutions over a
-full-resolution video frame.
+=gfx90a.kdb=. Every convolution shape is therefore compiled from source, and sometimes
+auto-tuned, the first time it is seen. MuseTalk's S3FD face detector alone runs 31
+convolutions over a full-resolution video frame, and its U-Net adds dozens more.
 
-=scripts/musetalk-inference.sh= points =MIOPEN_USER_DB_PATH= and
-=MIOPEN_CUSTOM_CACHE_DIR= at =miopen-cache/= in the workspace and keeps it across jobs,
-so only the first run pays for this. Do not delete that directory between runs, and do
-not put it on =/tmp=, which is node-local and gone by the next job.
+Three settings in =scripts/musetalk-inference.sh= turn that from unbounded into a
+one-off cost:
+
+- The live cache goes on node-local =/tmp=, seeded from =miopen-cache/= in the workspace
+  at job start and copied back at the end. MIOpen's cache is a SQLite database and is
+  pathologically slow on Lustre: the same cold S3FD layers cost ~100 s each with the
+  cache on =/scratch= versus ~25 s each on =/tmp=.
+- =MIOPEN_FIND_MODE=FAST=. In its default find mode MIOpen auto-tunes any convolution it
+  has no perf-db entry for, benchmarking several hundred configurations per layer, at
+  three to four minutes a layer.
+- =MIOPEN_TUNING_TIME_MS_MAX=10000=. FAST still lets a few tunable solvers tune, without
+  bound; this caps each one.
+
+Measured end to end on =small-g=, one GCD, both tasks of =configs/inference/test.yaml=:
+
+#+BEGIN_SRC text
+cold cache, default find mode   did not finish in 3 h
+cold cache, settings above      1 h 25 min
+warm cache                     13 min 42 s, zero MIOpen searches
+#+END_SRC
+
+So do not delete =miopen-cache/= between runs, and do not point MIOpen straight at it.
 
 * Run inference
 
@@ -120,6 +153,23 @@ export VENV=/opt/musetalk-venv
 #+BEGIN_SRC bash
 sbatch --chdir=$PWD scripts/musetalk-inference.sh
 #+END_SRC
+
+Results land in =results/v15/=, one mp4 per task in the inference config.
+
+* Notes for GPU access
+
+Use the LAIF bindings module rather than =singularity exec --rocm=:
+
+#+BEGIN_SRC bash
+module purge
+module use /appl/local/laifs/modules
+module load lumi-aif-singularity-bindings
+#+END_SRC
+
+=--rocm= injects the host's ROCm userspace into the container. On these images that
+fails with =ImportError: GLIBC_2.33 not found=, because the host is newer than the
+container -- and it is unnecessary in the first place, since the image ships its own
+complete ROCm stack.
 
 * References
 - [[https://docs.lumi-supercomputer.eu/software/containers/singularity/]]

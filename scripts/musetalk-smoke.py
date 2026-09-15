@@ -55,13 +55,15 @@ def main():
                 running_mode=RunningMode.IMAGE,
             )
         )
+    except FileNotFoundError:
+        # The library loaded, then rejected the bogus model path. That is the pass case.
+        pass
     except OSError as exc:
+        # A missing libEGL.so.1 / libGLESv2.so.2 surfaces here, as a dlopen failure.
         raise AssertionError(
             f"MediaPipe's native library failed to load: {exc}"
         ) from exc
     except Exception:
-        # Any other error means the library loaded and then rejected the bogus model
-        # path, which is what we want to see here.
         pass
     print("mediapipe native library loads (libEGL/libGLESv2 present)")
 
