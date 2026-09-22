@@ -19,14 +19,14 @@
 #   PORT        - server port (default: 30000)
 #
 # Example:
-#   export SIF=/scratch/$LUMI_PROJECT/$USER/lumi-sglang.sif
+#   export SIF=/scratch/$PROJECT/$USER/containers/sglang-lumi.sif
 #   export MODEL=meta-llama/Llama-3.1-8B-Instruct
 #   export HF_TOKEN=hf_...
 #   sbatch scripts/sglang-serve.sh
 
 set -euo pipefail
 
-: "${SIF:?SIF must be set to the path of lumi-sglang.sif}"
+: "${SIF:?SIF must be set to the path of sglang-lumi.sif}"
 : "${MODEL:?MODEL must be set to a HuggingFace model id or local path}"
 PORT="${PORT:-30000}"
 

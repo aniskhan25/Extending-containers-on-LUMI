@@ -17,10 +17,10 @@ set -euo pipefail
 
 PROJECT="${PROJECT:-project_462000131}"
 SGLANG_VERSION="${SGLANG_VERSION:-v0.5.6.post2}"
-CONTAINER="${CONTAINER:-/appl/local/laifs/containers/lumi-multitorch-u24r64f21m43t29-20260216_093549/lumi-multitorch-full-u24r64f21m43t29-20260216_093549.sif}"
+CONTAINER="${CONTAINER:-/appl/local/laifs/containers/lumi-multitorch-u24r70f21m50t210-20260807_115122/lumi-multitorch-full-u24r70f21m50t210-20260807_115122.sif}"
 INSTALL_PREFIX="/scratch/${PROJECT}/${USER}/sglang_env"
 
-# ── 1. Cleanup ──────────────────────────────────────────────────────────────
+# 1. Cleanup
 echo "[1/7] Cleanup old attempts"
 for p in "${INSTALL_PREFIX}" "${INSTALL_PREFIX}"_*; do
     [ -e "$p" ] && rm -rf "$p"
@@ -29,19 +29,19 @@ find "/tmp/${USER}" -maxdepth 1 -type d -name 'cw-*' -exec rm -rf {} + 2>/dev/nu
 find /tmp -maxdepth 1 -type f -user "${USER}" -name 'cw-tmp.*' -delete 2>/dev/null || true
 rm -f /tmp/lumi_sglang.yaml /tmp/post_sglang.sh /tmp/empty_requirements.txt
 
-# ── 2. Modules ──────────────────────────────────────────────────────────────
+# 2. Modules
 echo "[2/7] Load modules"
 module purge
 module load LUMI
 module load cray-python
 module load lumi-container-wrapper
 
-# ── 3. Prevent host env leakage into the container ──────────────────────────
+# 3. Prevent host env leakage into the container
 echo "[3/7] Isolate environment"
 unset LD_LIBRARY_PATH PYTHONPATH SINGULARITY_BIND APPTAINER_BIND \
       SINGULARITYENV_LD_LIBRARY_PATH APPTAINERENV_LD_LIBRARY_PATH 2>/dev/null || true
 
-# ── 4. Wrapper config: point at the pinned LAIF container ───────────────────
+# 4. Wrapper config: point at the pinned LAIF container
 echo "[4/7] Create wrapper config"
 WRAP_BIN="$(readlink -f "$(command -v pip-containerize)")"
 WRAP_ROOT="$(dirname "$(dirname "${WRAP_BIN}")")"
@@ -60,7 +60,7 @@ with open(p, "w") as f:
 print("Wrote", p)
 PY
 
-# ── 5. Post-install script ───────────────────────────────────────────────────
+# 5. Post-install script
 echo "[5/7] Write post-install script"
 cat > /tmp/post_sglang.sh <<SH
 #!/bin/bash
@@ -88,7 +88,7 @@ mv python/pyproject_other.toml python/pyproject.toml
 # time.  Skipping them produces an install that imports but fails on inference.
 python -m pip install --no-build-isolation "./python[all_hip]"
 
-# Install a sgl_kernel stub — the PyPI wheel is CUDA-only and the source
+# Install a sgl_kernel stub - the PyPI wheel is CUDA-only and the source
 # build requires nvcc (CMakeLists.txt declares CUDA as the project language).
 # SGLang imports sgl_kernel unconditionally but the actual kernel calls are
 # guarded by is_hip() checks; Triton/petit_kernel handle those on ROCm.
@@ -178,10 +178,10 @@ PY
 # Auto-sweep: walk the SGLang source tree and redirect every forward_hip that
 # references ops incompatible with MI250x/gfx90a to forward_native (pure PyTorch).
 # Catches in one pass:
-#   sgl_kernel.*         — CUDA-only lib; stub attributes are non-callable modules
-#   aiter.*              — not built for gfx90a; stub attributes are non-callable
-#   fused_add_rms_norm(  — LAIF vLLM expects 4 args, SGLang passes 6
-#   return self.forward_cuda(  — base-class delegation that reaches sgl_kernel
+#   sgl_kernel.*         - CUDA-only lib; stub attributes are non-callable modules
+#   aiter.*              - not built for gfx90a; stub attributes are non-callable
+#   fused_add_rms_norm(  - LAIF vLLM expects 4 args, SGLang passes 6
+#   return self.forward_cuda(  - base-class delegation that reaches sgl_kernel
 python - <<'PY'
 import ast
 from pathlib import Path
@@ -241,7 +241,7 @@ for py_file in sorted(sglang_root.rglob("*.py")):
     for start, end, ind, call_args in reversed(replacements):
         lines[start:end] = [
             f"{ind}# MI250x/gfx90a: sgl_kernel/aiter not available; vLLM op arity mismatch.",
-            f"{ind}# forward_native is the pure-PyTorch fallback — correct on all hardware.",
+            f"{ind}# forward_native is the pure-PyTorch fallback - correct on all hardware.",
             f"{ind}return self.forward_native({call_args})",
         ]
 
@@ -282,7 +282,7 @@ new = '''    except (FileNotFoundError, ValueError):
             "Ensure you have a GPU allocation (--gpus-per-node in srun/sbatch)."
         )'''
 
-assert old in src, f"Patch target not found in {path} — check SGLang version"
+assert old in src, f"Patch target not found in {path} - check SGLang version"
 path.write_text(src.replace(old, new, 1))
 print(f"Patched {path}")
 PY
@@ -294,7 +294,7 @@ PY
 SH
 chmod +x /tmp/post_sglang.sh
 
-# ── 6. Build the pip-containerize env ───────────────────────────────────────
+# 6. Build the pip-containerize env
 echo "[6/7] Build container env (this takes ~10-20 min)"
 : > /tmp/empty_requirements.txt
 CW_GLOBAL_YAML=/tmp/lumi_sglang.yaml \
@@ -304,7 +304,7 @@ pip-containerize new \
     --post-install /tmp/post_sglang.sh \
     /tmp/empty_requirements.txt
 
-# ── 7. Verify ───────────────────────────────────────────────────────────────
+# 7. Verify
 echo "[7/7] Verify"
 PY="${INSTALL_PREFIX}/bin/python"
 

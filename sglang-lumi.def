@@ -2,7 +2,7 @@ Bootstrap: localimage
 From: {{ LAIF_BASE }}
 
 %arguments
-    LAIF_BASE=/appl/local/laifs/containers/lumi-multitorch-latest.sif
+    LAIF_BASE=/appl/local/laifs/containers/lumi-multitorch-u24r70f21m50t210-20260807_115122/lumi-multitorch-full-u24r70f21m50t210-20260807_115122.sif
     SGLANG_VERSION=v0.5.6.post2
 
 %labels
@@ -29,7 +29,7 @@ From: {{ LAIF_BASE }}
 
     python -m pip install --no-cache-dir --upgrade pip
 
-    # ── clone SGLang at the pinned release ──────────────────────────────────
+    # clone SGLang at the pinned release
     rm -rf /tmp/sglang
     git clone --depth 1 --branch {{ SGLANG_VERSION }} \
         https://github.com/sgl-project/sglang.git /tmp/sglang
@@ -43,17 +43,17 @@ From: {{ LAIF_BASE }}
     mv python/pyproject_other.toml python/pyproject.toml
 
     # Install SGLang with all AMD/HIP extras (petit_kernel, wave-lang, etc.).
-    # Do NOT pass --no-deps — the extras in pyproject_other[all_hip] are needed
+    # Do NOT pass --no-deps - the extras in pyproject_other[all_hip] are needed
     # at runtime; skipping them produces a broken install that imports but fails.
     # --no-build-isolation exposes the venv's ROCm PyTorch to any C extensions.
     pip install --no-cache-dir --no-build-isolation "./python[all_hip]"
 
-    # ── sgl_kernel stub for ROCm ────────────────────────────────────────────
+    # sgl_kernel stub for ROCm
     # pyproject_other.toml removes sgl-kernel because the PyPI wheel is
     # CUDA-only and the source build requires nvcc (its CMakeLists.txt declares
     # CUDA as the project language and fails without it).
     # SGLang still imports sgl_kernel unconditionally in several files, but the
-    # actual kernel calls are guarded by is_hip() checks — the compiled kernels
+    # actual kernel calls are guarded by is_hip() checks - the compiled kernels
     # are not invoked on the ROCm code path (Triton/petit_kernel handle those
     # operations instead).  A minimal stub satisfies the import.
     python - <<'PY'
@@ -153,14 +153,14 @@ aiter_dir.mkdir(exist_ok=True)
 print(f"Created aiter stub at {aiter_dir}")
 PY
 
-    # ── auto-sweep: patch all forward_hip with incompatible ops ────────────
+    # auto-sweep: patch all forward_hip with incompatible ops
     # Walk the entire SGLang source tree with AST and redirect every forward_hip
     # that references ops incompatible with MI250x/gfx90a to forward_native
     # (pure PyTorch).  This catches in one pass:
-    #   • sgl_kernel.*  — CUDA-only lib; stub attributes are non-callable modules
-    #   • aiter.*       — not built for gfx90a; stub attributes are non-callable
-    #   • fused_add_rms_norm(  — LAIF vLLM expects 4 args; SGLang passes 6
-    #   • return self.forward_cuda(  — base-class delegation that reaches sgl_kernel
+    #   - sgl_kernel.*  - CUDA-only lib; stub attributes are non-callable modules
+    #   - aiter.*       - not built for gfx90a; stub attributes are non-callable
+    #   - fused_add_rms_norm(  - LAIF vLLM expects 4 args; SGLang passes 6
+    #   - return self.forward_cuda(  - base-class delegation that reaches sgl_kernel
     # forward_native is slower (pure PyTorch) but correct on all hardware.
     python - <<'PY'
 import ast
@@ -221,7 +221,7 @@ for py_file in sorted(sglang_root.rglob("*.py")):
     for start, end, ind, call_args in reversed(replacements):
         lines[start:end] = [
             f"{ind}# MI250x/gfx90a: sgl_kernel/aiter not available; vLLM op arity mismatch.",
-            f"{ind}# forward_native is the pure-PyTorch fallback — correct on all hardware.",
+            f"{ind}# forward_native is the pure-PyTorch fallback - correct on all hardware.",
             f"{ind}return self.forward_native({call_args})",
         ]
 
@@ -233,7 +233,7 @@ for f in patched:
     print(f"  sglang/{f}")
 PY
 
-    # ── patch get_amdgpu_memory_capacity for MI250x ─────────────────────────
+    # patch get_amdgpu_memory_capacity for MI250x
     # SGLang queries GPU memory via `rocminfo | grep ... | awk ...` during
     # argument parsing.  On MI250x/gfx90a the rocminfo output format does not
     # match the grep pattern, producing an empty string.  The except clause only
@@ -271,7 +271,7 @@ new = '''    except (FileNotFoundError, ValueError):
             "Ensure you have a GPU allocation (--gpus-per-node in srun/sbatch)."
         )'''
 
-assert old in src, f"Patch target not found in {path} — check SGLang version"
+assert old in src, f"Patch target not found in {path} - check SGLang version"
 path.write_text(src.replace(old, new, 1))
 print(f"Patched {path}")
 PY
@@ -282,6 +282,15 @@ PY
     export PATH=/opt/sglang-venv/bin:$PATH
     export VIRTUAL_ENV=/opt/sglang-venv
     export PYTHONNOUSERSITE=1
+
+    # The LAIF base sets PYTHONPATH=/opt/venv/lib/python3.12/site-packages, and
+    # PYTHONPATH precedes a venv's own site-packages.  Without this line the base
+    # shadows every package SGLang pinned: transformers resolves to the base's
+    # 5.10.1 instead of the venv's 4.57.1, and /v1/chat/completions then fails
+    # with "input_ids should be a list of lists for batch processing" (400).
+    # Prepend rather than unset - torch and the rest of the ROCm stack still come
+    # from the base.
+    export PYTHONPATH=/opt/sglang-venv/lib/python3.12/site-packages${PYTHONPATH:+:$PYTHONPATH}
 
     # Runtime: disable aiter (not installed; only meaningful on MI300X+).
     export SGLANG_USE_AITER=0
@@ -306,6 +315,20 @@ for name in ("sglang", "torch", "triton"):
 
 if "+rocm" not in torch.__version__:
     raise SystemExit("expected LAIF ROCm PyTorch to remain visible in venv")
+
+# The base's PYTHONPATH outranks the venv unless %environment prepends it, which
+# silently gives SGLang the base's transformers instead of the version it pinned.
+# The build still succeeds and the server still starts; only /v1/chat/completions
+# fails, so assert the resolution order here rather than discover it at runtime.
+import transformers
+
+if not transformers.__file__.startswith("/opt/sglang-venv/"):
+    raise SystemExit(
+        f"transformers resolves to {transformers.__file__} "
+        f"(v{transformers.__version__}) instead of the venv copy - "
+        "the base image is shadowing the venv, check PYTHONPATH in %environment"
+    )
+print(f"transformers: {transformers.__version__} (from venv)")
 
 print(f"torch.cuda.is_available: {torch.cuda.is_available()}")
 print(f"GPU count: {torch.cuda.device_count()}")

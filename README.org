@@ -1,220 +1,155 @@
-#+TITLE: Extending LAIF Containers on LUMI
+#+TITLE: Extending Containers on LUMI - SGLang
 #+AUTHOR: Anis Rahman
 #+OPTIONS: toc:nil
 #+OPTIONS: num:nil
 
-Examples of extending the LUMI AI Factory (LAIF) PyTorch Singularity container
-with additional Python packages.
+An [[https://github.com/sgl-project/sglang][SGLang]] inference server on LUMI-G, in a container extending the LUMI AI
+Factory multi-framework image. SGLang does not officially support MI250x - its
+ROCm targets are MI300X (=gfx942=) and MI350X (=gfx950=) - so =sglang-lumi.def=
+patches it at build time.
 
-| Container definition | Purpose                                        |
-|----------------------+------------------------------------------------|
-| =sglang-lumi.def=    | SGLang inference server (MI250x, experimental) |
+Verified 2026-09-22: SGLang =v0.5.6.post2= serving =Llama-3.1-8B-Instruct= on one
+MI250x GCD, torch =2.10.0+rocm7.0=, transformers =4.57.1=. Ready in 75 s from
+cold, =/v1/chat/completions= returns HTTP 200. Throughput is below MI300X.
 
-* SGLang on LUMI (Experimental)
+The base is pinned so the same definition always yields the same ROCm stack:
 
-** Status and Caveats
-
-Confirmed working on MI250x (=gfx90a=/CDNA2) with SGLang v0.5.6.post2 and
-Llama-3.1-8B-Instruct.  SGLang does *not* officially support MI250x — the
-official ROCm targets are MI300X (=gfx942=) and MI350X (=gfx950=) — so the
-container applies several compatibility patches at build time.
-
-Known limitations on MI250x:
-
-1. *=aiter= not compatible with gfx90a* ([[https://github.com/ROCm/aiter/issues/179][ROCm/aiter#179]]): the default
-   =pyproject.toml= pulls in =aiter=, whose =composable_kernel= build includes
-   FP8 kernels that gfx90a does not support, causing a build failure.
-   SGLang ships =pyproject_other.toml= as the AMD variant, which removes
-   =aiter= (and all other CUDA/NVIDIA-only deps) entirely.
-
-2. *No FlashInfer on MI250x*: FlashInfer's ROCm builds cover MI300X/MI325X/
-   MI355X only.  The Triton attention backend is used instead
-   (=SGLANG_ATTENTION_BACKEND=triton=, set automatically by the container).
-
-3. *CUDA graphs disabled*: =--disable-cuda-graph= is required; CUDA graph
-   capture triggers kernel compatibility checks that fail on gfx90a.
-
-4. *Pure-PyTorch kernel fallback*: the container patches all =forward_hip=
-   methods that reference =sgl_kernel= or incompatible vLLM ops to use
-   =forward_native= (pure PyTorch).  This is correct but slower than the
-   compiled kernels available on MI300X.
-
-5. *GPU allocation required at runtime*: SGLang queries GPU memory during
-   argument parsing.  Always run inside a GPU allocation — without
-   =--gpus-per-node= the server crashes immediately.
-
-Expect reduced throughput compared to MI300X.  Suitable for development and
-testing; evaluate performance before production use.
-
-** Step 1 — Build the image
-
-Get an interactive CPU node (no GPU needed for the build):
-
-#+BEGIN_SRC bash
-srun --account=$PROJECT --partition=small \
-     --ntasks=1 --cpus-per-task=8 --mem=120G \
-     --time=02:00:00 --nodes=1 --pty bash
+#+BEGIN_SRC text
+/appl/local/laifs/containers/lumi-multitorch-u24r70f21m50t210-20260807_115122/lumi-multitorch-full-u24r70f21m50t210-20260807_115122.sif
 #+END_SRC
 
-Set up the build environment:
+The pin is one line in =%arguments=; override it with
+=--build-arg LAIF_BASE=/path/to/base.sif=.
+
+* What the container patches
+
+- *=pyproject_other.toml= instead of =pyproject.toml=.* The default pulls
+  CUDA-only deps (flashinfer, sgl-kernel, nvidia-cutlass-dsl) and =aiter=, whose
+  =composable_kernel= build needs FP8 kernels gfx90a lacks ([[https://github.com/ROCm/aiter/issues/179][ROCm/aiter#179]]). The
+  AMD variant drops all of them.
+- *=sgl_kernel= and =aiter= stubs.* SGLang imports both at module level even
+  though the calls are guarded by =is_hip()=. A =MetaPathFinder= satisfies the
+  imports at any depth.
+- *=forward_hip= redirected to =forward_native=.* An AST sweep rewrites every
+  =forward_hip= reaching =sgl_kernel=, =aiter=, =forward_cuda=, or the 6-argument
+  =fused_add_rms_norm= the base's vLLM rejects. Slower, but correct.
+- *The venv prepended to =PYTHONPATH=.* The base sets
+  =PYTHONPATH=/opt/venv/lib/python3.12/site-packages=, which outranks a venv's own
+  =site-packages= and shadows everything SGLang pinned. Transformers then
+  resolves to the base's 5.10.1 instead of 4.57.1 and =/v1/chat/completions=
+  returns =400 input_ids should be a list of lists=, while the server still
+  starts and =/generate= still works. Prepend rather than unset - torch comes
+  from the base. =singularity test= asserts this, so the next base bump fails
+  the build instead of the first request.
+- *=get_amdgpu_memory_capacity= fallback.* SGLang parses =rocminfo= output that
+  does not match on gfx90a; the =ValueError= escapes its =except
+  FileNotFoundError=. Falls back to =torch.cuda.mem_get_info()=, as the NVIDIA
+  path already does.
+
+Two flags follow from this: =--attention-backend triton= (no FlashInfer on
+gfx90a) and =--disable-cuda-graph= (capture trips kernel checks on gfx90a).
+
+* Build
+
+#+BEGIN_SRC bash
+export PROJECT=<your-project>
+export SIF=/scratch/$PROJECT/$USER/containers/sglang-lumi.sif
+#+END_SRC
+
+#+BEGIN_SRC bash
+srun --account=$PROJECT --partition=small --ntasks=1 --cpus-per-task=8 --mem=120G --time=01:00:00 --nodes=1 --pty bash
+#+END_SRC
 
 #+BEGIN_SRC bash
 module purge
 module load CrayEnv
 module load PRoot
 
-mkdir -p /tmp/$USER
+mkdir -p /tmp/$USER $(dirname $SIF)
 export SINGULARITY_TMPDIR=/tmp/$USER
 export SINGULARITY_CACHEDIR=/tmp/$USER
+
+singularity build $SIF sglang-lumi.def
+singularity test $SIF
 #+END_SRC
 
-Build the image:
+About 7 minutes. =%post= clones and pip-installs, which works from =small=
+compute nodes.
 
-#+BEGIN_SRC bash
-export LAIF_BASE=/appl/local/laifs/containers/lumi-multitorch-latest.sif
-export SIF=/scratch/$PROJECT/$USER/lumi-sglang.sif
-
-singularity build --build-arg LAIF_BASE=$LAIF_BASE $SIF sglang-lumi.def
-#+END_SRC
-
-** Step 2 — Download a model
-
-Do this once from a login node or CPU allocation — no GPU needed.
-
-#+BEGIN_SRC bash
-module purge
-module use /appl/local/laifs/modules
-module load lumi-aif-singularity-bindings
-#+END_SRC
-
-#+BEGIN_SRC bash
-export SIF=/scratch/$PROJECT/$USER/lumi-sglang.sif
-export MODEL_DIR=/scratch/$PROJECT/$USER/models/Llama-3.1-8B-Instruct
-
-mkdir -p $MODEL_DIR
-
-singularity exec $SIF \
-  hf download meta-llama/Llama-3.1-8B-Instruct \
-  --local-dir $MODEL_DIR \
-  --token $HF_TOKEN
-#+END_SRC
-
-=HF_TOKEN= must have access to the gated model.  Request access at
-[[https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct]] if needed.
-
-** Step 3 — Get a GPU allocation (dev-g)
-
-#+BEGIN_SRC bash
-srun --account=$PROJECT --partition=dev-g \
-     --nodes=1 --ntasks=1 --cpus-per-task=7 \
-     --gpus-per-node=1 --mem=120G \
-     --time=01:00:00 --pty bash
-#+END_SRC
-
-Adjust =--gpus-per-node= and =--cpus-per-task= for multi-GPU runs
-(7 CPU cores per GPU is the recommended ratio on LUMI-G).
-
-** Step 4 — Set up the runtime environment
+* Get a model
 
 #+BEGIN_SRC bash
 module purge
 module use /appl/local/laifs/modules
 module load lumi-aif-singularity-bindings
 
-MIOPEN_DIR=$(mktemp -d)
-export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_DIR/cache
-export MIOPEN_USER_DB=$MIOPEN_DIR/config
-#+END_SRC
-
-** Step 5 — Run the server
-
-#+BEGIN_SRC bash
-export SIF=/scratch/$PROJECT/$USER/lumi-sglang.sif
 export MODEL=/scratch/$PROJECT/$USER/models/Llama-3.1-8B-Instruct
+mkdir -p $MODEL
 
-singularity exec \
-  ${HF_TOKEN:+--env HF_TOKEN=$HF_TOKEN} \
-  "$SIF" \
-  python -m sglang.launch_server \
-    --model-path "$MODEL" \
-    --host 0.0.0.0 \
-    --port 30000 \
-    --tp-size 1 \
-    --attention-backend triton \
-    --disable-cuda-graph
+singularity exec $SIF hf download meta-llama/Llama-3.1-8B-Instruct \
+    --local-dir $MODEL --token $HF_TOKEN
 #+END_SRC
 
-Set =--tp-size= to match the number of GPUs allocated.  Use a local model
-path under =/scratch= or a HuggingFace model id (requires =HF_TOKEN= for
-gated models).
+=HF_TOKEN= needs access to the gated repo:
+[[https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct]].
 
-For a SLURM batch job see =scripts/sglang-serve.sh=.
+* Run
 
-** Step 6 — Test the server
-
-The server runs in the foreground.  LUMI compute nodes do not accept direct
-SSH, so use =srun --overlap= to attach a second shell to the same job.
-From a *new terminal* logged into any LUMI login node:
+SGLang reads GPU memory while parsing arguments, so it needs a GPU allocation -
+without =--gpus-per-node= it exits immediately. Seven cores per GCD is the LUMI-G
+ratio.
 
 #+BEGIN_SRC bash
-squeue --me              # note your JOBID
+srun --account=$PROJECT --partition=dev-g --nodes=1 --ntasks=1 --cpus-per-task=7 --gpus-per-node=1 --mem=120G --time=01:00:00 --pty bash
+#+END_SRC
+
+#+BEGIN_SRC bash
+module purge
+module use /appl/local/laifs/modules
+module load lumi-aif-singularity-bindings
+
+singularity exec ${HF_TOKEN:+--env HF_TOKEN=$HF_TOKEN} "$SIF" \
+    python -m sglang.launch_server \
+        --model-path "$MODEL" \
+        --host 0.0.0.0 \
+        --port 30000 \
+        --tp-size 1 \
+        --attention-backend triton \
+        --disable-cuda-graph
+#+END_SRC
+
+Set =--tp-size= to the number of GCDs allocated. For a batch job see
+=scripts/sglang-serve.sh=.
+
+Use the bindings module, not =singularity exec --rocm=: =--rocm= injects the
+host's ROCm userspace and fails with =ImportError: GLIBC_2.33 not found=, and
+the image already ships its own ROCm stack.
+
+* Test
+
+The server holds the terminal and compute nodes refuse direct SSH, so attach a
+second shell to the job from a login node. Note that =--overlap= shells inherit
+nothing, so re-export =MODEL= and reload the bindings module there.
+
+#+BEGIN_SRC bash
+squeue --me
 srun --overlap --pty --jobid=<JOBID> bash
 #+END_SRC
 
-Then test:
-
 #+BEGIN_SRC bash
-# Health check
 curl -s http://localhost:30000/health
 
-# OpenAI-compatible chat request
 curl -s http://localhost:30000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "default",
-    "messages": [{"role": "user", "content": "What is 2+2?"}],
-    "max_tokens": 50
-  }' | python3 -m json.tool
+  -d '{"model": "default",
+       "messages": [{"role": "user", "content": "What is 2+2?"}],
+       "max_tokens": 50}' | python3 -m json.tool
 #+END_SRC
 
-You should see a JSON response with the reply in =choices[0].message.content=.
+The reply is in =choices[0].message.content=.
 
-To run the server in the background instead (frees the terminal).  Note
-that environment variables are not inherited across =srun --overlap= shells,
-so re-export them before launching:
-
-#+BEGIN_SRC bash
-export SIF=/scratch/$PROJECT/$USER/lumi-sglang.sif
-export MODEL=/scratch/$PROJECT/$USER/models/Llama-3.1-8B-Instruct
-
-module purge
-module use /appl/local/laifs/modules
-module load lumi-aif-singularity-bindings
-
-MIOPEN_DIR=$(mktemp -d)
-export MIOPEN_CUSTOM_CACHE_DIR=$MIOPEN_DIR/cache
-export MIOPEN_USER_DB=$MIOPEN_DIR/config
-
-singularity exec \
-  ${HF_TOKEN:+--env HF_TOKEN=$HF_TOKEN} \
-  "$SIF" \
-  python -m sglang.launch_server \
-    --model-path "$MODEL" \
-    --host 0.0.0.0 \
-    --port 30000 \
-    --tp-size 1 \
-    --attention-backend triton \
-    --disable-cuda-graph \
-  > sglang.log 2>&1 &
-
-echo "Server PID: $!"
-tail -f sglang.log   # watch startup; Ctrl-C once you see "ready to roll"
-#+END_SRC
-
-** References
-
+* References
 - [[https://docs.lumi-supercomputer.eu/software/containers/singularity/]]
 - [[https://docs.lumi-supercomputer.eu/laif/software/ai-environment/]]
 - [[https://docs.sglang.io/platforms/amd_gpu.html][SGLang AMD GPU docs]]
-- [[https://github.com/ROCm/aiter/issues/179][ROCm/aiter#179 — gfx90a FP8 build failure]]
-- [[https://rocm.docs.amd.com/en/latest/compatibility/ml-compatibility/flashinfer-compatibility.html][FlashInfer ROCm compatibility matrix]]
+- [[https://github.com/ROCm/aiter/issues/179][ROCm/aiter#179 - gfx90a FP8 build failure]]
