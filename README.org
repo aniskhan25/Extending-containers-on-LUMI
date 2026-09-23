@@ -10,7 +10,8 @@ patches it at build time.
 
 Verified 2026-09-22: SGLang =v0.5.6.post2= serving =Llama-3.1-8B-Instruct= on one
 MI250x GCD, torch =2.10.0+rocm7.0=, transformers =4.57.1=. Ready in 75 s from
-cold, =/v1/chat/completions= returns HTTP 200. Throughput is below MI300X.
+cold, =/v1/chat/completions= returns HTTP 200. See =* Benchmark= below for
+throughput against vLLM.
 
 The base is pinned so the same definition always yields the same ROCm stack:
 
@@ -147,6 +148,40 @@ curl -s http://localhost:30000/v1/chat/completions \
 #+END_SRC
 
 The reply is in =choices[0].message.content=.
+
+* Benchmark
+
+One MI250x GCD, Llama-3.1-8B-Instruct, 1024 in / 256 out, 40-600 prompts scaled
+with concurrency, median of 3-6 runs:
+
+| concurrency | SGLang tok/s | SGLang ITL ms | vLLM tok/s | vLLM ITL ms | vLLM eager tok/s |
+|-------------+--------------+---------------+------------+-------------+------------------|
+|           1 |           28 |          35.1 |         72 |        13.7 |               63 |
+|           8 |          197 |          34.8 |        327 |        20.1 |              293 |
+|          32 |          589 |          36.4 |        816 |        26.0 |              810 |
+|          64 |          764 |          42.2 |        917 |        34.8 |              911 |
+
+vLLM is faster at every level, but its lead falls from 2.6x at concurrency 1 to
+1.2x at 64. SGLang's inter-token latency barely moves across the sweep (35 to 42
+ms) while vLLM's climbs from 13.7 to 34.8, so the two converge under load; by
+concurrency 64 SGLang has the better time to first token (234 ms against 272
+ms). Both engines completed every request at every level, with identical output
+token counts.
+
+The =vLLM eager= column runs vLLM with =--enforce-eager=, which disables the
+CUDA graphs SGLang cannot use on gfx90a. It costs vLLM 12% at concurrency 1 and
+nothing measurable at 32 and above, so graphs are not what separates the two
+engines under load - the kernels are. vLLM here is =0.22.1+lumi.aif.gfx90a=,
+built for this architecture, against SGLang running the pure-PyTorch
+=forward_native= fallbacks described above. The gap is the cost of that
+fallback, not a property of SGLang itself.
+
+Reproduce with =scripts/bench-sglang.sh= and =scripts/bench-vllm.sh= (set
+=EAGER=1= for the third column), then =scripts/bench-report.py <bench-dir>= to
+regenerate this table. Both engines are driven through =/v1/completions= by the
+same =sglang.bench_serving= client, so neither is measured by its own tooling.
+Run the sweep more than once: a single run is not stable enough to quote, and
+short runs overstate throughput badly.
 
 * References
 - [[https://docs.lumi-supercomputer.eu/software/containers/singularity/]]
