@@ -44,18 +44,24 @@ load_modules
 echo "=== node $(hostname)  $(date) ==="
 echo "image  $SIF"
 echo "model  $MODEL"
+echo "tp     $TP"
 echo "sweep  $CONCURRENCY  ($NUM_PROMPTS prompts, ${INPUT_LEN} in / ${OUTPUT_LEN} out)"
 
 # --attention-backend triton and --disable-cuda-graph are required on gfx90a;
 # see the container notes in README.org. --served-model-name matches what the
 # vLLM job serves, so the client sends the same model field to both.
-singularity exec "$SIF" \
+# Multi-GCD runs need every GCD visible to the container; at tp=1 the allocation
+# already scopes it, and listing all eight would be wrong.
+ROCR_ARG=()
+[ "$TP" -gt 1 ] && ROCR_ARG=(--env ROCR_VISIBLE_DEVICES=0,1,2,3,4,5,6,7)
+
+singularity exec "${ROCR_ARG[@]}" "$SIF" \
     python -m sglang.launch_server \
         --model-path "$MODEL" \
         --served-model-name default \
         --host 127.0.0.1 \
         --port "$PORT" \
-        --tp-size 1 \
+        --tp-size "$TP" \
         --attention-backend triton \
         --disable-cuda-graph \
     > "$SERVER_LOG" 2>&1 &

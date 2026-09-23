@@ -14,6 +14,7 @@
 #   INPUT_LEN     synthetic prompt tokens       (default: 1024)
 #   OUTPUT_LEN    generated tokens per request  (default: 256)
 #   SEED          dataset seed                  (default: 42)
+#   TP            tensor-parallel size          (default: 1; needs matching --gpus-per-node)
 
 PROJECT="${PROJECT:-project_462000131}"
 MODEL="${MODEL:-/scratch/${PROJECT}/${USER}/models/Llama-3.1-8B-Instruct}"
@@ -23,6 +24,7 @@ NUM_PROMPTS="${NUM_PROMPTS:-600}"
 INPUT_LEN="${INPUT_LEN:-1024}"
 OUTPUT_LEN="${OUTPUT_LEN:-256}"
 SEED="${SEED:-42}"
+TP="${TP:-1}"
 
 load_modules() {
     module purge
@@ -76,6 +78,7 @@ bench_once() {
             --max-concurrency "$conc" \
             --warmup-requests 20 \
             --seed "$SEED" \
+            --tag "tp$TP" \
             --disable-tqdm \
             --output-file "$out"
 }

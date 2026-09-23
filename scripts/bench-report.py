@@ -88,9 +88,23 @@ def main():
     lens = [len(recs) for by_e in runs.values() for recs in by_e.values()]
     nruns = f"{min(lens)}" if min(lens) == max(lens) else f"{min(lens)}-{max(lens)}"
 
+    # GCD count: vLLM records no tp field, so prefer the tag bench_once sets and
+    # fall back to SGLang's server_info for results captured before the tag
+    # existed. Hardcoding "one GCD" silently mislabels every multi-GCD table.
+    gcds = None
+    for by_e in runs.values():
+        for recs in by_e.values():
+            for r in recs:
+                tag = r.get("tag") or ""
+                if tag.startswith("tp") and tag[2:].isdigit():
+                    gcds = int(tag[2:])
+                elif gcds is None:
+                    gcds = (r.get("server_info") or {}).get("tp_size")
+    hw = f"{gcds} MI250x GCD{'s' if gcds and gcds > 1 else ''}" if gcds else "MI250x"
+
     print("* Benchmark\n")
     print(
-        f"One MI250x GCD, Llama-3.1-8B-Instruct, "
+        f"{hw}, Llama-3.1-8B-Instruct, "
         f"{sample.get('random_input_len')} in / {sample.get('random_output_len')} out, "
         f"{span} prompts scaled with concurrency, "
         f"median of {nruns} runs:\n"

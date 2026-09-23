@@ -54,6 +54,7 @@ echo "=== node $(hostname)  $(date) ==="
 echo "server image  $LAIF_BASE"
 echo "client image  $SIF"
 echo "model         $MODEL"
+echo "tp            $TP"
 echo "sweep         $CONCURRENCY  ($NUM_PROMPTS prompts, ${INPUT_LEN} in / ${OUTPUT_LEN} out)"
 
 # serve_and_sweep <outdir> <server_log> [extra vllm flags...]
@@ -67,7 +68,7 @@ serve_and_sweep() {
             --served-model-name default \
             --host 127.0.0.1 \
             --port "$PORT" \
-            --tensor-parallel-size 1 \
+            --tensor-parallel-size "$TP" \
             --max-model-len 8192 \
             "$@" \
         > "$server_log" 2>&1 &
