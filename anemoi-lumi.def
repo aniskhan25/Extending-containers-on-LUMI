@@ -2,7 +2,7 @@ Bootstrap: localimage
 From: {{ LAIF_BASE }}
 
 %arguments
-    LAIF_BASE=/appl/local/laifs/containers/lumi-multitorch-u24r70f21m50t210-20260807_115122/lumi-multitorch-full-u24r70f21m50t210-20260807_115122.sif
+    LAIF_BASE=/appl/local/laifs/containers/lumi-multitorch-u24r72f21m50t211-20260929_104918/lumi-multitorch-full-u24r72f21m50t211-20260929_104918.sif
 
 %labels
     Author Anis Rahman
@@ -33,10 +33,50 @@ for pkg in ("torch", "torchvision", "torchaudio", "pytorch-triton", "triton"):
         pass
 PY
 
-    python -m pip install --no-cache-dir -c /opt/rocm-constraints.txt \
+    # anemoi-core caps torch<2.11 (re-added in ecmwf/anemoi-core#1204 over
+    # torch 2.12 compile changes), which excludes the base's torch 2.11. Pip
+    # has no override mechanism, so install the anemoi packages without deps,
+    # then install their requirements minus torch and the anemoi packages
+    # themselves (following the extras they request from each other).
+    python -m pip install --no-cache-dir --no-deps \
         'anemoi-training==0.14.0' \
         'anemoi-models==0.16.0' \
-        'anemoi-graphs==0.9.4' \
+        'anemoi-graphs==0.9.4'
+
+    python - > /opt/anemoi-deps.txt <<'PY'
+import re
+from importlib.metadata import requires
+from packaging.requirements import Requirement
+
+def norm(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+ANEMOI = {"anemoi-training", "anemoi-models", "anemoi-graphs"}
+todo = [(name, frozenset()) for name in sorted(ANEMOI)]
+seen, deps = set(), set()
+while todo:
+    pkg, extras = todo.pop()
+    if (pkg, extras) in seen:
+        continue
+    seen.add((pkg, extras))
+    for line in requires(pkg) or []:
+        req = Requirement(line)
+        if req.marker and not any(req.marker.evaluate({"extra": e}) for e in {"", *extras}):
+            continue
+        name = norm(req.name)
+        if name in ANEMOI:
+            todo.append((name, frozenset(req.extras)))
+        elif name != "torch":
+            req.marker = None
+            deps.add(str(req))
+print("\n".join(sorted(deps)))
+PY
+    cat /opt/anemoi-deps.txt
+
+    # torch-geometric>=2.8.0 is the first PyG release supporting torch 2.11.
+    python -m pip install --no-cache-dir -c /opt/rocm-constraints.txt \
+        -r /opt/anemoi-deps.txt \
+        'torch-geometric>=2.8.0' \
         'zarr<3' \
         'trimesh' \
         'pyshtools'

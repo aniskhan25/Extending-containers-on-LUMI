@@ -14,13 +14,20 @@ The base image is pinned to a specific LAIF build rather than tracking
 same ROCm and PyTorch stack:
 
 #+BEGIN_SRC text
-/appl/local/laifs/containers/lumi-multitorch-u24r70f21m50t210-20260807_115122/lumi-multitorch-full-u24r70f21m50t210-20260807_115122.sif
+/appl/local/laifs/containers/lumi-multitorch-u24r72f21m50t211-20260929_104918/lumi-multitorch-full-u24r72f21m50t211-20260929_104918.sif
 #+END_SRC
 
 The pin lives in =%arguments= in =anemoi-lumi.def= and is the single line to
 bump when moving to a newer LAIF image. To build against a different base
 without editing the file, pass =--build-arg LAIF_BASE=/path/to/base.sif= to
 =singularity build=.
+
+This base ships torch 2.11, while every Anemoi release caps =torch<2.11=
+(re-added upstream in [[https://github.com/ecmwf/anemoi-core/pull/1204][anemoi-core#1204]] over torch 2.12 changes). The
+definition file installs the Anemoi packages with =--no-deps= and then their
+remaining requirements, so the base's ROCm torch is kept. =pip check= inside
+the container therefore reports the three Anemoi packages as wanting
+=torch<2.11=; this is expected.
 
 * Build the container
 
@@ -29,7 +36,7 @@ Container builds require significant memory. Allocate resources on a login node 
 #+BEGIN_SRC bash
 export PROJECT=<your-project>
 export CONTAINER_DIR=/scratch/$PROJECT/$USER/containers
-export SIF=$CONTAINER_DIR/anemoi-lumi-u24r70f21m50t210.sif
+export SIF=$CONTAINER_DIR/anemoi-lumi-u24r72f21m50t211.sif
 #+END_SRC
 
 #+BEGIN_SRC bash

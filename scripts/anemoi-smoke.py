@@ -47,6 +47,7 @@ def main() -> None:
         "anemoi.training",
         "anemoi.models",
         "anemoi.graphs",
+        "torch_geometric",
         "zarr",
         "trimesh",
         "pyshtools",
