@@ -42,12 +42,35 @@ def check_below(name: str, exclusive_max: str) -> None:
     )
 
 
+def check_seed_overflow_fix() -> None:
+    """Guard against ecmwf/anemoi-core#1217 (fixed in anemoi-training 0.16.0).
+
+    Before the fix, seed_rnd used base_seed * (model_comm_group_id + 1); with
+    base_seed falling back to SLURM_JOB_ID this exceeds 2**32 - 1 after a few
+    hundred model groups and one rank crashes at init while the rest hang.
+    """
+    import pytorch_lightning as pl
+    from anemoi.training.distributed import strategy
+    from anemoi.training.utils.seeding import SeedContext, derive_seed
+
+    assert getattr(strategy, "derive_seed", None) is derive_seed, (
+        "anemoi.training.distributed.strategy does not use derive_seed; "
+        "the seed-overflow fix (anemoi-core#1228) is missing"
+    )
+    seed = derive_seed(2**32 - 1, SeedContext.MODEL, 4095)
+    pl.seed_everything(seed, verbose=False)
+    print(f"ok    seed overflow fix: derive_seed(2**32-1, MODEL, 4095) = {seed}")
+
+
 def main() -> None:
     packages = [
         "anemoi.training",
         "anemoi.models",
         "anemoi.graphs",
         "torch_geometric",
+        # Imported by the forecaster task in anemoi-training 0.16.0.
+        "anemoi.training.tasks",
+        "datashader",
         "zarr",
         "trimesh",
         "pyshtools",
@@ -78,6 +101,8 @@ def main() -> None:
     # base image at newer versions, so assert the pinned ones win.
     check_below("zarr", "3")
     check_below("numcodecs", "0.16")
+
+    check_seed_overflow_fix()
 
 
 if __name__ == "__main__":

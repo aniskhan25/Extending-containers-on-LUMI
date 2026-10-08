@@ -39,9 +39,9 @@ PY
     # then install their requirements minus torch and the anemoi packages
     # themselves (following the extras they request from each other).
     python -m pip install --no-cache-dir --no-deps \
-        'anemoi-training==0.14.0' \
-        'anemoi-models==0.16.0' \
-        'anemoi-graphs==0.9.4'
+        'anemoi-training==0.16.0' \
+        'anemoi-models==0.18.0' \
+        'anemoi-graphs==0.9.6'
 
     python - > /opt/anemoi-deps.txt <<'PY'
 import re
@@ -53,6 +53,9 @@ def norm(name):
 
 ANEMOI = {"anemoi-training", "anemoi-models", "anemoi-graphs"}
 todo = [(name, frozenset()) for name in sorted(ANEMOI)]
+# anemoi-training 0.16.0 imports datashader whenever the forecaster task loads,
+# but only declares it in the "plotting" extra.
+todo.append(("anemoi-training", frozenset({"plotting"})))
 seen, deps = set(), set()
 while todo:
     pkg, extras = todo.pop()
